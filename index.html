@@ -1582,4 +1582,2402 @@ const K = {
   entries: 'jannik_travel_entries',
   routes: 'jannik_drawn_routes',
   posts: 'jannik_posts',
-  
+  theme: 'reisen_theme',
+  last: 'reisen_last_location',
+  cats: 'reisen_poi_categories'
+};
+/* localStorage kann fehlen (z. B. eingebettete Vorschau ohne „allow-same-origin“, privater
+   Modus, gesperrte Cookies). Dann arbeitet die App mit einem Speicher im Arbeitsspeicher,
+   damit sie benutzbar bleibt – die Daten gehen dort aber beim Schließen verloren. */
+let lsOk = true;
+try { localStorage.setItem('__reisen_test', '1'); localStorage.removeItem('__reisen_test'); } catch { lsOk = false; }
+const memStore = {};
+const store = {
+  persistent: lsOk,
+  str(k) { try { return lsOk ? localStorage.getItem(k) : (k in memStore ? memStore[k] : null); } catch { return null; } },
+  setStr(k, v) { try { if (lsOk) localStorage.setItem(k, v); else memStore[k] = String(v); return true; } catch { return false; } },
+  remove(k) { try { if (lsOk) localStorage.removeItem(k); delete memStore[k]; } catch { /* egal */ } },
+  get(k, d) { try { const v = store.str(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) {
+    const s = JSON.stringify(v);
+    if (!lsOk) { memStore[k] = s; return true; }
+    try { localStorage.setItem(k, s); return true; }
+    catch { toast('Speicher voll – bitte ältere Einträge löschen oder exportieren.', 'err'); return false; }
+  }
+};
+
+/* ---------- Medien-DB (IndexedDB) ----------
+   Bilder und Videos liegen als Blobs in IndexedDB statt als riesige Base64-Strings
+   im localStorage (5-MB-Limit). Im Datensatz steht nur die Referenz (mediaId). */
+const idb = (() => {
+  let dbp = null;
+  const open = () => dbp || (dbp = new Promise((res, rej) => {
+    if (!('indexedDB' in window)) return rej(new Error('IndexedDB nicht verfügbar'));
+    const r = indexedDB.open('reisen-media', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('media');
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  }));
+  const run = async (mode, fn) => {
+    const db = await open();
+    return new Promise((res, rej) => {
+      const t = db.transaction('media', mode);
+      const rq = fn(t.objectStore('media'));
+      t.oncomplete = () => res(rq ? rq.result : undefined);
+      t.onerror = () => rej(t.error);
+      t.onabort = () => rej(t.error || new Error('abgebrochen'));
+    });
+  };
+  return {
+    put: (id, blob) => run('readwrite', s => s.put(blob, id)),
+    get: id => run('readonly', s => s.get(id)),
+    del: id => run('readwrite', s => s.delete(id)),
+    keys: () => run('readonly', s => s.getAllKeys()),
+    clear: () => run('readwrite', s => s.clear())
+  };
+})();
+
+const mediaUrls = new Map();
+async function mediaUrl(id) {
+  if (mediaUrls.has(id)) return mediaUrls.get(id);
+  try {
+    const blob = await idb.get(id);
+    if (!blob) return '';
+    const u = URL.createObjectURL(blob);
+    mediaUrls.set(id, u);
+    return u;
+  } catch { return ''; }
+}
+async function hydrateMedia(root = document) {
+  for (const el of $$('[data-media]', root)) {
+    if (el.dataset.done) continue;
+    el.dataset.done = '1';
+    const u = await mediaUrl(el.dataset.media);
+    if (u) el.src = u;
+    else el.replaceWith(Object.assign(document.createElement('div'), { className: 'hint', textContent: 'Medium nicht mehr verfügbar.' }));
+  }
+}
+async function dropMedia(att) {
+  const id = att && att.mediaId;
+  if (!id || att._kept) return;          // _kept = bereits gespeicherter Anhang, nicht löschen
+  try { await idb.del(id); } catch { /* egal */ }
+  const u = mediaUrls.get(id);
+  if (u) { URL.revokeObjectURL(u); mediaUrls.delete(id); }
+}
+
+/* ---------- Netzwerk ---------- */
+async function fetchJson(url, opts = {}, timeout = 15000) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeout);
+  try {
+    const r = await fetch(url, { ...opts, signal: ctl.signal });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return await r.json();
+  } finally { clearTimeout(t); }
+}
+
+/* ---------- Toast ---------- */
+function toast(msg, kind = '') {
+  const host = $('#toastHost');
+  if (!host) return;
+  const el = document.createElement('div');
+  el.className = 'toast ' + kind;
+  el.setAttribute('role', 'status');
+  el.textContent = msg;
+  host.appendChild(el);
+  setTimeout(() => { el.style.transition = 'opacity .25s'; el.style.opacity = '0'; setTimeout(() => el.remove(), 260); }, kind === 'err' ? 5200 : 2800);
+  while (host.children.length > 3) host.firstChild.remove();
+}
+
+/* ---------- Dialoge ---------- */
+let zTop = 2000;
+const openModals = [];
+const onClose = {};
+function openModal(id) {
+  const m = document.getElementById(id);
+  if (!m) return;
+  zTop += 10;
+  m.style.zIndex = zTop;
+  m.classList.add('open');
+  m.setAttribute('aria-hidden', 'false');
+  const i = openModals.indexOf(id);
+  if (i >= 0) openModals.splice(i, 1);
+  openModals.push(id);
+  document.body.classList.add('modal-open');
+  const f = $('input:not([type=hidden]):not([type=file]):not([type=range]), textarea', m);
+  const touch = window.matchMedia && matchMedia('(pointer:coarse)').matches;
+  if (f && !touch) setTimeout(() => f.focus(), 60);
+}
+function closeModal(id) {
+  const m = document.getElementById(id);
+  if (!m) return;
+  m.classList.remove('open');
+  m.setAttribute('aria-hidden', 'true');
+  const i = openModals.indexOf(id);
+  if (i >= 0) openModals.splice(i, 1);
+  if (!openModals.length) document.body.classList.remove('modal-open');
+  if (onClose[id]) { const f = onClose[id]; delete onClose[id]; f(); }
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && openModals.length) closeModal(openModals[openModals.length - 1]);
+});
+
+let confirmResolve = null;
+function confirmDialog(title, text, okLabel = 'Löschen') {
+  return new Promise(res => {
+    if (confirmResolve) confirmResolve(false);
+    confirmResolve = res;
+    $('#confirmTitle').textContent = title;
+    $('#confirmText').textContent = text;
+    $('#confirmOk').textContent = okLabel;
+    onClose.confirmModal = () => { if (confirmResolve) { const r = confirmResolve; confirmResolve = null; r(false); } };
+    openModal('confirmModal');
+  });
+}
+function answerConfirm(yes) {
+  const r = confirmResolve;
+  confirmResolve = null;
+  delete onClose.confirmModal;
+  closeModal('confirmModal');
+  if (r) r(yes);
+}
+
+/* ---------- Konfiguration ---------- */
+/* Orte-Kategorien. tags = passende OSM-Tags (Wert '*' = beliebig), maxKm = bis zu welchem Umkreis
+   die Kategorie geladen wird (bei großem Umkreis nur wichtige Orte), unnamed = auch ohne Namen
+   anzeigen, on:false = anfangs ausgeblendet, prio = Reihenfolge beim Zuordnen (klein zuerst). */
+const CAT_GROUPS = ['Essen & Trinken', 'Einkaufen', 'Unterkunft', 'Sehenswertes & Kultur', 'Natur & Freizeit', 'Verkehr', 'Service & Gesundheit'];
+const privateAccess = t => ['private', 'no', 'customers', 'permit', 'delivery'].includes(t.access);
+const categoryConfig = {
+  restaurants: { g: 0, emoji: '🍽️', color: '#3b82f6', label: 'Restaurants', maxKm: 10, tags: { amenity: ['restaurant', 'food_court'] } },
+  cafes: { g: 0, emoji: '☕', color: '#a16207', label: 'Cafés & Eis', maxKm: 10, tags: { amenity: ['cafe', 'ice_cream'], shop: ['ice_cream', 'coffee', 'tea'] } },
+  fastfood: { g: 0, emoji: '🍔', color: '#ea580c', label: 'Imbiss', maxKm: 5, tags: { amenity: ['fast_food'] } },
+  bars: { g: 0, emoji: '🍻', color: '#7c3aed', label: 'Bars & Kneipen', maxKm: 10, tags: { amenity: ['bar', 'pub', 'biergarten', 'nightclub'] } },
+  bakery: { g: 0, emoji: '🥖', color: '#d97706', label: 'Bäcker & Metzger', maxKm: 5, tags: { shop: ['bakery', 'butcher', 'pastry', 'confectionery', 'chocolate'] } },
+  supermarkets: { g: 1, emoji: '🛒', color: '#16a34a', label: 'Lebensmittel', maxKm: 10, tags: { shop: ['supermarket', 'convenience', 'greengrocer', 'farm', 'deli', 'beverages', 'kiosk', 'health_food', 'organic'] } },
+  malls: { g: 1, emoji: '🏬', color: '#db2777', label: 'Kaufhäuser & Center', maxKm: 15, tags: { shop: ['mall', 'department_store'] } },
+  shops: { g: 1, emoji: '🛍️', color: '#ec4899', label: 'Geschäfte', maxKm: 5, prio: 9, tags: { shop: '*' } },
+  hotels: { g: 2, emoji: '🏨', color: '#f59e0b', label: 'Hotels & Pensionen', maxKm: 50, tags: { tourism: ['hotel', 'guest_house', 'hostel', 'motel', 'apartment', 'chalet'] } },
+  camping: { g: 2, emoji: '⛺', color: '#65a30d', label: 'Camping & Hütten', maxKm: 50, tags: { tourism: ['camp_site', 'caravan_site', 'alpine_hut', 'wilderness_hut'] } },
+  museums: { g: 3, emoji: '🖼️', color: '#b91c1c', label: 'Museen & Galerien', maxKm: 50, tags: { tourism: ['museum', 'gallery'] } },
+  viewpoints: { g: 3, emoji: '🔭', color: '#0ea5e9', label: 'Aussichtspunkte', maxKm: 50, tags: { tourism: ['viewpoint'] } },
+  churches: { g: 3, emoji: '⛪', color: '#64748b', label: 'Kirchen & Klöster', maxKm: 15, tags: { amenity: ['place_of_worship', 'monastery'] } },
+  culture: { g: 3, emoji: '🎭', color: '#be185d', label: 'Kino, Theater & Kultur', maxKm: 25, tags: { amenity: ['theatre', 'cinema', 'arts_centre', 'events_venue', 'library', 'planetarium'] } },
+  zoo: { g: 3, emoji: '🦁', color: '#f97316', label: 'Zoo & Freizeitpark', maxKm: 50, tags: { tourism: ['zoo', 'theme_park', 'aquarium'] } },
+  sights: { g: 3, emoji: '🏛️', color: '#ef4444', label: 'Sehenswürdigkeiten', maxKm: 50, prio: 8, tags: { tourism: ['attraction', 'artwork'], historic: '*' } },
+  wiki: { g: 3, emoji: '📖', color: '#475569', label: 'Wikipedia-Artikel', maxKm: 50, tags: {} },
+  parks: { g: 4, emoji: '🌳', color: '#22c55e', label: 'Parks & Gärten', maxKm: 25, tags: { leisure: ['park', 'garden', 'nature_reserve'] } },
+  nature: { g: 4, emoji: '⛰️', color: '#0f766e', label: 'Natur-Highlights', maxKm: 50, tags: { natural: ['peak', 'waterfall', 'spring', 'beach', 'cave_entrance', 'hot_spring', 'volcano'] } },
+  swim: { g: 4, emoji: '🏊', color: '#06b6d4', label: 'Baden & Schwimmen', maxKm: 25, tags: { leisure: ['swimming_area', 'water_park', 'beach_resort', 'swimming_pool'], amenity: ['public_bath'] } },
+  playground: { g: 4, emoji: '🛝', color: '#f472b6', label: 'Spielplätze', maxKm: 3, unnamed: true, tags: { leisure: ['playground'] } },
+  sports: { g: 4, emoji: '⚽', color: '#84cc16', label: 'Sport & Fitness', maxKm: 10, tags: { leisure: ['sports_centre', 'stadium', 'golf_course', 'miniature_golf', 'fitness_centre', 'ice_rink', 'bowling_alley'] } },
+  parking: { g: 5, emoji: '🅿️', color: '#64748b', label: 'Parken', maxKm: 5, unnamed: true, reject: privateAccess, tags: { amenity: ['parking'] } },
+  fuel: { g: 5, emoji: '⛽', color: '#10b981', label: 'Tanken', maxKm: 25, unnamed: true, tags: { amenity: ['fuel'] } },
+  charging: { g: 5, emoji: '⚡', color: '#0d9488', label: 'E-Ladesäulen', maxKm: 10, unnamed: true, tags: { amenity: ['charging_station'] } },
+  transit: { g: 5, emoji: '🚉', color: '#6366f1', label: 'Bahnhöfe', maxKm: 50, tags: { railway: ['station', 'halt', 'tram_stop'], amenity: ['bus_station'], public_transport: ['station'] } },
+  busstops: { g: 5, emoji: '🚌', color: '#818cf8', label: 'Haltestellen', maxKm: 3, on: false, tags: { highway: ['bus_stop'] } },
+  airport: { g: 5, emoji: '✈️', color: '#0284c7', label: 'Flughäfen', maxKm: 50, tags: { aeroway: ['aerodrome'] }, reject: t => t.aeroway === 'aerodrome' && (t.aerodrome === 'private' || t.access === 'private') },
+  bike: { g: 5, emoji: '🚲', color: '#2563eb', label: 'Fahrrad', maxKm: 10, tags: { amenity: ['bicycle_rental', 'bicycle_repair_station'], shop: ['bicycle'] } },
+  pharmacy: { g: 6, emoji: '💊', color: '#8b5cf6', label: 'Apotheken', maxKm: 10, unnamed: true, tags: { amenity: ['pharmacy'] } },
+  doctors: { g: 6, emoji: '🩺', color: '#e11d48', label: 'Ärzte & Kliniken', maxKm: 10, tags: { amenity: ['doctors', 'clinic', 'hospital', 'dentist'] } },
+  banks: { g: 6, emoji: '🏦', color: '#059669', label: 'Banken & Geldautomaten', maxKm: 5, unnamed: true, tags: { amenity: ['bank', 'atm'] } },
+  post: { g: 6, emoji: '📮', color: '#eab308', label: 'Post', maxKm: 5, tags: { amenity: ['post_office'] } },
+  toilets: { g: 6, emoji: '🚻', color: '#78716c', label: 'Toiletten', maxKm: 3, unnamed: true, tags: { amenity: ['toilets'] } },
+  water: { g: 6, emoji: '🚰', color: '#38bdf8', label: 'Trinkwasser', maxKm: 3, on: false, unnamed: true, tags: { amenity: ['drinking_water'] } },
+  info: { g: 6, emoji: 'ℹ️', color: '#0891b2', label: 'Touristeninfo', maxKm: 25, tags: { tourism: ['information'] }, reject: t => !['office', 'visitor_centre'].includes(t.information) }
+};
+const movementConfig = {
+  walking: { color: '#64748b', icon: '🚶', label: 'Zu Fuß' },
+  bicycle: { color: '#3b82f6', icon: '🚲', label: 'Fahrrad' },
+  car: { color: '#ef4444', icon: '🚗', label: 'Auto' },
+  airplane: { color: '#8b5cf6', icon: '✈️', label: 'Flugzeug' },
+  boat: { color: '#14b8a6', icon: '⛵', label: 'Boot' },
+  train: { color: '#f59e0b', icon: '🚆', label: 'Zug' },
+  bus: { color: '#ec4899', icon: '🚌', label: 'Bus' },
+  motorcycle: { color: '#10b981', icon: '🏍️', label: 'Motorrad' }
+};
+const moveCfg = t => movementConfig[t] || movementConfig.car;
+
+/* ---------- Design ---------- */
+function effectiveTheme() {
+  const t = document.documentElement.getAttribute('data-theme');
+  if (t === 'light' || t === 'dark') return t;
+  return window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+}
+function setTheme(v) {
+  if (!['auto', 'light', 'dark'].includes(v)) v = 'auto';
+  document.documentElement.setAttribute('data-theme', v);
+  store.setStr(K.theme, v);
+  $$('#themeSeg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.themeSet === v)));
+  allMaps().forEach(m => { if (m._autoBase) { m.setBase(effectiveTheme() === 'dark' ? 'Dunkel' : 'Karte'); m._autoBase = true; } });
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = effectiveTheme() === 'light' ? '#f2f5fb' : '#0a0f1d';
+}
+
+/* ---------- Navigation ---------- */
+const view = { current: 'map' };
+function showView(v) {
+  view.current = v;
+  $$('.view').forEach(s => { s.hidden = s.dataset.viewId !== v; });
+  $$('[data-view]').forEach(b => { const on = b.dataset.view === v; b.classList.toggle('active', on); b.setAttribute('aria-current', on ? 'page' : 'false'); });
+  window.scrollTo(0, 0);
+  if (v === 'map' && typeof mainMap !== 'undefined' && mainMap) setTimeout(() => mainMap.invalidateSize(), 60);
+  if (v === 'travel') { initTimelineMap(); renderTravel(); setTimeout(() => timelineMap && timelineMap.invalidateSize(), 60); }
+  if (v === 'account') renderAccount();
+}
+
+/* ---------- Standort (GPS) ---------- */
+function getPosition() {
+  return new Promise((res, rej) => {
+    if (!('geolocation' in navigator)) return rej(new Error('GPS wird von diesem Gerät oder Browser nicht unterstützt.'));
+    navigator.geolocation.getCurrentPosition(res, err => {
+      const msg = { 1: 'GPS-Zugriff verweigert. Bitte in den Browser-Einstellungen erlauben (nur über https oder localhost verfügbar).', 2: 'Standort konnte nicht ermittelt werden.', 3: 'GPS-Zeitüberschreitung. Bitte erneut versuchen.' }[err.code] || 'GPS-Fehler.';
+      rej(new Error(msg));
+    }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 });
+  });
+}
+
+/* ---------- Ortssuche: Photon (schnell, toleriert Tippfehler) + Nominatim (Rückfall) ---------- */
+const NOMINATIM = 'https://nominatim.openstreetmap.org';
+const PHOTON = 'https://photon.komoot.io';
+const uniqStr = a => a.filter((v, i) => v && a.indexOf(v) === i);
+
+function shortName(r) {
+  const a = r.address || {};
+  const city = a.city || a.town || a.village || a.municipality || a.hamlet || '';
+  const first = r.name || (r.display_name || '').split(',')[0] || '';
+  return [first, city && city !== first ? city : ''].filter(Boolean).join(', ') || r.display_name || 'Ort';
+}
+function fromPhoton(f) {
+  const p = f.properties || {}, c = f.geometry && f.geometry.coordinates;
+  if (!c || !isFinite(c[0]) || !isFinite(c[1])) return null;
+  const street = p.street ? p.street + (p.housenumber ? ' ' + p.housenumber : '') : '';
+  const place = p.city || p.locality || p.district || '';
+  const title = p.name || street || place || p.county || p.state || p.country || '';
+  if (!title) return null;
+  const label = uniqStr([
+    p.name ? street : '',
+    [p.postcode, place && place !== title ? place : ''].filter(Boolean).join(' '),
+    p.county && p.county !== title ? p.county : '',
+    p.state && p.state !== title ? p.state : '',
+    p.country
+  ]).join(', ');
+  return { lat: +c[1], lon: +c[0], name: place && place !== title ? title + ', ' + place : title, title, label, kind: p.osm_value || p.type || '' };
+}
+function fromNominatim(r) {
+  const parts = String(r.display_name || '').split(',').map(x => x.trim());
+  const title = r.name || parts[0] || '';
+  if (!title || !isFinite(+r.lat) || !isFinite(+r.lon)) return null;
+  return { lat: +r.lat, lon: +r.lon, name: shortName(r), title, label: uniqStr(parts.slice(r.name ? 1 : 1)).join(', '), kind: r.type || '' };
+}
+async function searchPlaces(q, opts = {}) {
+  q = String(q || '').trim();
+  if (!q) return [];
+  const limit = opts.limit || 6, enc = encodeURIComponent(q);
+  const bias = opts.bias === false ? null : store.get(K.last, null);
+  const photon = async () => {
+    const url = `${PHOTON}/api/?q=${enc}&limit=${limit + 3}&lang=de` + (bias && isFinite(bias.lat) ? `&lat=${bias.lat}&lon=${bias.lon}` : '');
+    const d = await fetchJson(url, {}, 7000);
+    return (d.features || []).map(fromPhoton).filter(Boolean);
+  };
+  const nominatim = async () => {
+    const d = await fetchJson(`${NOMINATIM}/search?format=jsonv2&limit=${limit + 2}&addressdetails=1&accept-language=de&q=${enc}`, {}, 9000);
+    return d.map(fromNominatim).filter(Boolean);
+  };
+  const order = /^\d{4,5}$/.test(q) ? [nominatim, photon] : [photon, nominatim];
+  let res = [], failed = 0;
+  for (const fn of order) {
+    try { res = await fn(); if (res.length) break; } catch { failed++; }
+  }
+  if (!res.length && failed === order.length) throw new Error('Ortssuche nicht erreichbar');
+  const seen = [], out = [];
+  for (const r of res) {
+    if (seen.some(o => o.title === r.title && o.label === r.label)) continue;
+    if (seen.some(o => o.title === r.title && getDistanceKm(o.lat, o.lon, r.lat, r.lon) < 0.3)) continue;
+    seen.push(r); out.push(r);
+  }
+  return out.slice(0, limit);
+}
+async function geocode(q) {
+  const r = await searchPlaces(q, { limit: 1 });
+  return r.length ? { lat: r[0].lat, lon: r[0].lon, name: r[0].name, raw: r[0] } : null;
+}
+async function reverseGeocode(lat, lon) {
+  try {
+    return await fetchJson(`${NOMINATIM}/reverse?format=jsonv2&zoom=14&addressdetails=1&accept-language=de&lat=${lat}&lon=${lon}`, {}, 9000);
+  } catch (e) {
+    const d = await fetchJson(`${PHOTON}/reverse?lat=${lat}&lon=${lon}&lang=de`, {}, 7000);
+    const p = d.features && d.features[0] && d.features[0].properties;
+    if (!p) throw e;
+    const city = p.city || p.locality || p.district || '';
+    return { name: p.name, display_name: uniqStr([p.name, p.street, p.postcode, city, p.state, p.country]).join(', '), address: { city, town: '', village: '', county: p.county, road: p.street } };
+  }
+}
+
+/* Trefferliste unter einem Eingabefeld (live beim Tippen + beim Absenden) */
+function makeSuggest({ input, list, onPick, minChars = 3 }) {
+  let items = [], active = -1, token = 0, timer = 0, lastQ = '';
+  const close = () => { token++; list.hidden = true; list.innerHTML = ''; items = []; active = -1; input.setAttribute('aria-expanded', 'false'); };
+  const info = txt => { list.innerHTML = `<li class="suggest-info">${esc(txt)}</li>`; list.hidden = false; };
+  const mark = () => $$('[data-i]', list).forEach((b, i) => { b.classList.toggle('active', i === active); b.setAttribute('aria-selected', String(i === active)); if (i === active) b.scrollIntoView({ block: 'nearest' }); });
+  const render = () => {
+    list.innerHTML = items.map((it, i) => `<li><button type="button" role="option" data-i="${i}"><span class="s-ic">${ic('pin')}</span><span class="s-tx"><b>${esc(it.title)}</b><span>${esc(it.label)}</span></span></button></li>`).join('');
+    list.hidden = false; input.setAttribute('aria-expanded', 'true');
+  };
+  const pick = i => { const it = items[i]; if (!it) return; close(); onPick(it, lastQ); };
+  async function lookup(q, auto) {
+    const my = ++token;
+    lastQ = q;
+    info('Suche …');
+    try {
+      const res = await searchPlaces(q, { limit: 6 });
+      if (my !== token) return;
+      if (!res.length) { info('Nichts gefunden. Anders schreiben oder PLZ probieren.'); return; }
+      if (!auto && res.length === 1) { close(); onPick(res[0], q); return; }
+      items = res; active = -1; render();
+    } catch {
+      if (my !== token) return;
+      info('Die Ortssuche ist gerade nicht erreichbar. Verbindung prüfen und erneut versuchen.');
+    }
+  }
+  input.setAttribute('role', 'combobox'); input.setAttribute('aria-autocomplete', 'list'); input.setAttribute('aria-expanded', 'false');
+  list.setAttribute('role', 'listbox');
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    const q = input.value.trim();
+    if (q.length < minChars) { close(); return; }
+    timer = setTimeout(() => lookup(q, true), 380);
+  });
+  input.addEventListener('keydown', e => {
+    if (list.hidden || !items.length) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); active = (active + 1) % items.length; mark(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); active = (active - 1 + items.length) % items.length; mark(); }
+    else if (e.key === 'Enter' && active >= 0) { e.preventDefault(); pick(active); }
+    else if (e.key === 'Escape') { e.stopPropagation(); close(); }
+  });
+  list.addEventListener('click', e => { const b = e.target.closest('[data-i]'); if (b) pick(+b.dataset.i); });
+  document.addEventListener('click', e => {
+    if (list.hidden || list.contains(e.target) || e.target === input) return;
+    const sb = e.target.closest && e.target.closest('button[type=submit]');
+    if (sb && sb.form && sb.form === input.form) return; /* der Such-Knopf selbst darf die Suche nicht abbrechen */
+    close();
+  });
+  return {
+    close,
+    submit() { clearTimeout(timer); const q = input.value.trim(); if (q) lookup(q, false); else close(); }
+  };
+}
+
+/* ---------- Karten-Bausteine ---------- */
+const OSM_ATTR = '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a>-Mitwirkende';
+const ESRI_ATTR = 'Karte © <a href="https://www.esri.com" target="_blank" rel="noopener noreferrer">Esri</a>, HERE, Garmin, © OpenStreetMap-Mitwirkende';
+const ESRI = n => `https://server.arcgisonline.com/ArcGIS/rest/services/${n}/MapServer/tile/{z}/{y}/{x}`;
+/* Nur Quellen, die ohne Schlüssel und ohne Referer-Kopf funktionieren (auch beim Öffnen als Datei). CARTO verlangt seit Kurzem einen API-Schlüssel. */
+const BASES = {
+  'Karte': L.tileLayer(ESRI('World_Street_Map'), { maxZoom: 18, attribution: ESRI_ATTR }),
+  'Dunkel': L.tileLayer(ESRI('World_Street_Map'), { maxZoom: 18, attribution: ESRI_ATTR, filter: 'invert(1) hue-rotate(180deg) brightness(.92) contrast(.9) saturate(.75)' }),
+  'Topografisch': L.tileLayer(ESRI('World_Topo_Map'), { maxZoom: 18, attribution: ESRI_ATTR }),
+  'Satellit': L.tileLayer(ESRI('World_Imagery'), { maxZoom: 18, attribution: 'Bilder © Esri, Maxar, Earthstar Geographics' }),
+  'OpenStreetMap': L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: OSM_ATTR })
+};
+const allMaps = () => [typeof mainMap !== 'undefined' && mainMap, typeof timelineMap !== 'undefined' && timelineMap, typeof routeMap !== 'undefined' && routeMap].filter(Boolean);
+function addMapControls(map) { map.setBases(BASES, effectiveTheme() === 'dark' ? 'Dunkel' : 'Karte'); }
+function emojiIcon(color, emoji) {
+  return L.divIcon({ className: '', html: `<div class="poi-pin" style="background:${color}">${emoji}</div>`, iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -15] });
+}
+function numIcon(color, n) {
+  return L.divIcon({ className: '', html: `<div class="num-pin" style="background:${color}">${n}</div>`, iconSize: [28, 28], iconAnchor: [14, 14], popupAnchor: [0, -14] });
+}
+function setOverlay(show, text) {
+  const o = $('#mapOverlay');
+  if (!o) return;
+  o.hidden = !show;
+  if (text) $('#mapOverlayText').textContent = text;
+}
+
+
+/* =====================================================================
+   Anhänge: Bild, Video, GIF, Standort, YouTube, Reddit, Umfrage
+   Jeder Bereich (post, reply, travel, pin) hat einen eigenen Entwurf –
+   so landet ein Anhang nie versehentlich in einem anderen Formular.
+   ===================================================================== */
+
+const drafts = { post: null, reply: null, travel: null, pin: null };
+const attCtx = { target: null, linkType: 'yt' };
+const POLL_TARGETS = ['post', 'reply'];
+
+const GIF_PRESETS = [
+  'https://media.giphy.com/media/3o7TKSjRrfIPjeiOkM/giphy.gif',
+  'https://media.giphy.com/media/l0HlHFRbmaZtBRhXG/giphy.gif',
+  'https://media.giphy.com/media/26ufevH9u8N4W1K6k/giphy.gif',
+  'https://media.giphy.com/media/3oKIPnAiaMCws8nOsE/giphy.gif',
+  'https://media.giphy.com/media/xTiTnHXbRoaZ1B1Mo8/giphy.gif',
+  'https://media.giphy.com/media/3o7527pa7qs9kCG78A/giphy.gif',
+  'https://media.giphy.com/media/3oKIPv878d22hS0uOI/giphy.gif',
+  'https://media.giphy.com/media/l1J9EdzfOSgfyueLm/giphy.gif',
+  'https://media.giphy.com/media/3o7abKhOpu0NwenH3O/giphy.gif',
+  'https://media.giphy.com/media/g9582DUtQpaCI/giphy.gif',
+  'https://media.giphy.com/media/l41lFw197lDq4ZVfy/giphy.gif',
+  'https://media.giphy.com/media/3ohzdIuqJoo8QdKlnW/giphy.gif',
+  'https://media.giphy.com/media/xTiTnBzmAPnmdNMTRK/giphy.gif',
+  'https://media.giphy.com/media/26u6dTP6p4y0iyBIQ/giphy.gif',
+  'https://media.giphy.com/media/xT5LMFZDsj0AKUDYTS/giphy.gif',
+  'https://media.giphy.com/media/3o7TKWpu2SKaHCI75C/giphy.gif',
+  'https://media.giphy.com/media/l0HlBO7eyXzSZkJri/giphy.gif',
+  'https://media.giphy.com/media/3oKIPEhWlvZ28rkrDO/giphy.gif'
+];
+const EMOJIS = ['😀', '😄', '😁', '😂', '🥹', '😍', '🤩', '😎', '🥳', '😌', '🤔', '😴', '😅', '🙏', '👍', '👏', '🙌', '💪', '🔥', '✨', '❤️', '💙', '💛', '🎉', '🌍', '✈️', '🧳', '🗺️', '📍', '🏖️', '🏔️', '🌅', '🌄', '🌆', '🏛️', '⛪', '🚗', '🚆', '🚲', '⛵', '🍕', '🍝', '🍣', '🥐', '☕', '🍺', '🍷', '🍦', '📸', '🎒', '⛺', '🌲', '🌊', '🌞', '🌧️', '❄️', '🐶', '🐱', '🦋', '🌸'];
+
+/* ---------- Werkzeugleiste ---------- */
+function toolbarHtml(t) {
+  const btn = (act, cls, icon, label, extra = '') => `<button type="button" class="tbtn ${cls}" data-act="${act}" data-target="${t}" ${extra}>${ic(icon)}<span>${label}</span></button>`;
+  return `<div class="toolbar">
+    <label class="tbtn t-img">${ic('image')}<span>Bild</span><input type="file" accept="image/*" hidden data-file="image" data-target="${t}"></label>
+    <label class="tbtn t-vid">${ic('video')}<span>Video</span><input type="file" accept="video/*" hidden data-file="video" data-target="${t}"></label>
+    ${btn('att-gif', 't-gif', 'film', 'GIF')}
+    ${btn('att-place', 't-loc', 'pin', 'Standort')}
+    ${btn('att-yt', 't-yt', 'play', 'YouTube')}
+    ${btn('att-reddit', 't-red', 'link', 'Reddit')}
+    ${POLL_TARGETS.includes(t) ? btn('att-poll', 't-poll', 'poll', 'Umfrage') + btn('emoji', 't-emoji', 'smile', 'Emoji') : ''}
+  </div>`;
+}
+function mountToolbars() {
+  $('#postToolbar').innerHTML = toolbarHtml('post');
+  $('#replyToolbar').innerHTML = toolbarHtml('reply');
+  $('#entryToolbar').innerHTML = toolbarHtml('travel');
+  $('#pinToolbar').innerHTML = toolbarHtml('pin');
+}
+
+/* ---------- Entwurf ---------- */
+function attLabel(a) {
+  switch (a.type) {
+    case 'image': return 'Bild';
+    case 'video': return 'Video';
+    case 'gif': return 'GIF';
+    case 'place': return 'Standort: ' + (a.label || '');
+    case 'youtube': return 'YouTube-Video';
+    case 'reddit': return 'Reddit-Beitrag';
+    case 'link': return 'Link';
+    case 'poll': return 'Umfrage: ' + (a.question || '');
+    default: return 'Anhang';
+  }
+}
+function renderDraft(t) {
+  const el = document.getElementById('draft-' + t);
+  if (!el) return;
+  const a = drafts[t];
+  if (!a) { el.innerHTML = ''; return; }
+  let thumb = '';
+  if (a.type === 'image') thumb = a.mediaId ? `<img alt="" data-media="${esc(a.mediaId)}">` : `<img alt="" src="${esc(a.src || '')}">`;
+  else if (a.type === 'gif') thumb = `<img alt="" src="${esc(safeUrl(a.url))}">`;
+  else if (a.type === 'youtube' && a.videoId) thumb = `<img alt="" src="https://img.youtube.com/vi/${esc(a.videoId)}/mqdefault.jpg">`;
+  el.innerHTML = `${thumb}<span class="grow">${ic('link')} ${esc(attLabel(a))}</span>
+    <button type="button" class="btn btn-ghost btn-icon btn-sm" data-act="draft-clear" data-target="${t}" aria-label="Anhang entfernen">${ic('x')}</button>`;
+  hydrateMedia(el);
+}
+function setDraft(t, a) {
+  if (drafts[t] && drafts[t] !== a) dropMedia(drafts[t]);   // ersetzten Entwurf aufräumen
+  drafts[t] = a;
+  renderDraft(t);
+}
+function clearDraft(t, { keepMedia = false } = {}) {
+  if (!keepMedia && drafts[t]) dropMedia(drafts[t]);
+  drafts[t] = null;
+  renderDraft(t);
+}
+/* Entwurf übernehmen (Medien bleiben erhalten) und Feld leeren. */
+function takeDraft(t) {
+  const a = drafts[t];
+  drafts[t] = null;
+  renderDraft(t);
+  return a;
+}
+
+/* ---------- Datei-Upload ---------- */
+function loadImageEl(file) {
+  return new Promise((res, rej) => {
+    const u = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(u); res(img); };
+    img.onerror = () => { URL.revokeObjectURL(u); rej(new Error('Bild konnte nicht gelesen werden')); };
+    img.src = u;
+  });
+}
+async function compressImage(file, max = 1600, quality = 0.82) {
+  if (file.type === 'image/gif') return file;              // Animation nicht zerstören
+  const src = window.createImageBitmap ? await createImageBitmap(file).catch(() => null) : null;
+  const img = src || await loadImageEl(file);
+  const w0 = img.width, h0 = img.height;
+  const k = Math.min(1, max / Math.max(w0, h0));
+  if (k === 1 && file.type === 'image/jpeg' && file.size < 400 * 1024) return file;
+  const c = document.createElement('canvas');
+  c.width = Math.round(w0 * k); c.height = Math.round(h0 * k);
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(img, 0, 0, c.width, c.height);
+  if (src && src.close) src.close();
+  const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', quality));
+  return blob || file;
+}
+const fileToDataUrl = blob => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(blob); });
+
+async function handleFileUpload(input) {
+  const file = input.files && input.files[0];
+  const t = input.dataset.target;
+  const kind = input.dataset.file;
+  input.value = '';
+  if (!file) return;
+  if (kind === 'video' && file.size > 150 * 1024 * 1024) { toast('Video zu groß (max. 150 MB).', 'err'); return; }
+  try {
+    toast(kind === 'video' ? 'Video wird gespeichert …' : 'Bild wird verarbeitet …');
+    const blob = kind === 'image' ? await compressImage(file) : file;
+    const mediaId = 'm_' + uid();
+    try {
+      await idb.put(mediaId, blob);
+      setDraft(t, { type: kind, mediaId });
+    } catch {
+      if (kind === 'video') throw new Error('Videos können in diesem Browser nicht gespeichert werden.');
+      setDraft(t, { type: 'image', src: await fileToDataUrl(blob) });   // Notlösung ohne IndexedDB
+    }
+    toast('Anhang hinzugefügt.', 'ok');
+  } catch (e) {
+    toast(e.message || 'Datei konnte nicht verarbeitet werden.', 'err');
+  }
+}
+
+/* ---------- GIF ---------- */
+function openGifPicker(t) {
+  attCtx.target = t;
+  $('#gifGrid').innerHTML = GIF_PRESETS.map(u => `<img src="${esc(u)}" alt="GIF" loading="lazy" data-act="gif-pick" data-url="${esc(u)}" onerror="this.remove()">`).join('');
+  openModal('gifModal');
+}
+function pickGif(url) {
+  const u = safeUrl(url);
+  if (!u) { toast('Ungültige GIF-Adresse.', 'err'); return; }
+  setDraft(attCtx.target, { type: 'gif', url: u });
+  closeModal('gifModal');
+  toast('GIF angehängt.', 'ok');
+}
+
+/* ---------- Standort ---------- */
+function openPlacePicker(t) { attCtx.target = t; $('#placeAddrInput').value = ''; openModal('placeModal'); }
+function confirmPlace(it) {
+  setDraft(attCtx.target, { type: 'place', label: it.name, lat: it.lat, lon: it.lon });
+  closeModal('placeModal');
+  toast('Ort angehängt.', 'ok');
+}
+async function confirmPlaceGps() {
+  try {
+    const p = await getPosition();
+    const lat = +p.coords.latitude.toFixed(5), lon = +p.coords.longitude.toFixed(5);
+    setDraft(attCtx.target, { type: 'place', label: 'Aktueller Standort', lat, lon });
+    closeModal('placeModal');
+    toast('GPS-Standort übernommen.', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+/* ---------- Links (YouTube / Reddit) ---------- */
+const ytId = url => { const m = /(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:[^#]*&)?v=|shorts\/|embed\/|live\/))([\w-]{11})/.exec(url); return m ? m[1] : ''; };
+function openLinkPicker(t, type) {
+  attCtx.target = t; attCtx.linkType = type;
+  const reddit = type === 'reddit';
+  $('#linkModalTitle').textContent = reddit ? '🔴 Reddit-Beitrag teilen' : '🎥 YouTube-Video oder Link';
+  $('#linkModalLabel').textContent = reddit ? 'Reddit-URL' : 'URL';
+  $('#linkUrlInput').placeholder = reddit ? 'https://www.reddit.com/r/…' : 'https://www.youtube.com/watch?v=…';
+  $('#linkUrlInput').value = '';
+  openModal('linkModal');
+}
+function confirmLinkAttachment() {
+  const url = safeUrl($('#linkUrlInput').value);
+  if (!url) { toast('Bitte eine gültige Adresse eingeben.', 'err'); return; }
+  let a;
+  if (attCtx.linkType === 'reddit') {
+    const host = new URL(url).hostname;
+    if (!/(^|\.)(reddit\.com|redd\.it)$/.test(host)) { toast('Das sieht nicht nach einem Reddit-Link aus.', 'err'); return; }
+    a = { type: 'reddit', url };
+  } else {
+    const id = ytId(url);
+    a = id ? { type: 'youtube', url, videoId: id } : { type: 'link', url };
+  }
+  setDraft(attCtx.target, a);
+  closeModal('linkModal');
+  toast('Link angehängt.', 'ok');
+}
+
+/* ---------- Umfrage ---------- */
+function openPollPicker(t) {
+  attCtx.target = t;
+  ['pollQuestionInput', 'pollOpt1', 'pollOpt2', 'pollOpt3', 'pollOpt4'].forEach(id => { $('#' + id).value = ''; });
+  openModal('pollModal');
+}
+function confirmPollAttachment() {
+  const q = $('#pollQuestionInput').value.trim();
+  const opts = ['pollOpt1', 'pollOpt2', 'pollOpt3', 'pollOpt4'].map(id => $('#' + id).value.trim()).filter(Boolean);
+  if (!q || opts.length < 2) { toast('Bitte eine Frage und mindestens zwei Optionen eingeben.', 'err'); return; }
+  setDraft(attCtx.target, { type: 'poll', question: q, options: opts.map(text => ({ text, votes: 0 })), voted: {} });
+  closeModal('pollModal');
+}
+
+/* ---------- Emoji ---------- */
+const emojiTarget = { el: null };
+function openEmoji(t) {
+  emojiTarget.el = t === 'reply' ? $('#replyText') : $('#postText');
+  $('#emojiGrid').innerHTML = EMOJIS.map(e => `<button type="button" data-act="emoji-pick" data-emoji="${e}" aria-label="${e}">${e}</button>`).join('');
+  openModal('emojiModal');
+}
+function insertEmoji(e) {
+  const el = emojiTarget.el;
+  if (el) {
+    const s = el.selectionStart ?? el.value.length, en = el.selectionEnd ?? el.value.length;
+    el.value = el.value.slice(0, s) + e + el.value.slice(en);
+    el.selectionStart = el.selectionEnd = s + e.length;
+  }
+  closeModal('emojiModal');
+  if (el) el.focus();
+}
+
+/* ---------- Anzeige ---------- */
+/* Ältere Datensätze (Emoji-Typen wie "📸 Bild") werden in das neue Format übersetzt. */
+function normAtt(a) {
+  if (!a || typeof a !== 'object') return null;
+  if (['image', 'video', 'gif', 'place', 'youtube', 'reddit', 'link', 'poll'].includes(a.type)) return a;
+  const t = String(a.type || '');
+  if (t.includes('Bild')) return { type: 'image', src: a.data };
+  if (t.includes('Video')) return { type: 'video', src: a.data };
+  if (t.includes('GIF')) return { type: 'gif', url: a.data };
+  if (t.includes('Standort')) return { type: 'place', label: String(a.data || '') };
+  if (t.includes('YouTube')) { const id = ytId(String(a.data || '')); return id ? { type: 'youtube', url: a.data, videoId: id } : { type: 'link', url: a.data }; }
+  if (t.includes('Reddit')) return { type: 'reddit', url: a.data };
+  if (t.includes('Umfrage') && a.data) return { type: 'poll', question: a.data.question, options: a.data.options || [], voted: {} };
+  return null;
+}
+function mapsLink(a) {
+  if (a.lat != null && a.lon != null) return `https://www.openstreetmap.org/?mlat=${a.lat}&mlon=${a.lon}#map=16/${a.lat}/${a.lon}`;
+  return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(a.label || '');
+}
+function attHtml(raw, ctx = {}) {
+  const a = normAtt(raw);
+  if (!a) return '';
+  const card = (icon, title, sub, href) => `<a class="att-card" href="${esc(href)}" target="_blank" rel="noopener noreferrer"><span class="ico">${ic(icon)}</span><span class="grow"><strong>${esc(title)}</strong><small>${esc(sub)}</small></span></a>`;
+  switch (a.type) {
+    case 'image':
+      return `<div class="att">${a.mediaId ? `<img alt="Bild" data-media="${esc(a.mediaId)}" loading="lazy">` : `<img alt="Bild" src="${esc(a.src || '')}" loading="lazy">`}</div>`;
+    case 'video':
+      return `<div class="att">${a.mediaId ? `<video controls preload="metadata" playsinline data-media="${esc(a.mediaId)}"></video>` : `<video controls preload="metadata" playsinline src="${esc(a.src || '')}"></video>`}</div>`;
+    case 'gif': {
+      const u = safeUrl(a.url);
+      return u ? `<div class="att"><img alt="GIF" src="${esc(u)}" loading="lazy"></div>` : '';
+    }
+    case 'place':
+      return `<div class="att">${card('pin', a.label || 'Standort', a.lat != null ? `${(+a.lat).toFixed(4)}, ${(+a.lon).toFixed(4)}` : 'Auf der Karte öffnen', mapsLink(a))}</div>`;
+    case 'youtube': {
+      const u = safeUrl(a.url);
+      if (!u || !a.videoId) return '';
+      return `<div class="att"><a class="att-yt" href="${esc(u)}" target="_blank" rel="noopener noreferrer" aria-label="YouTube-Video öffnen"><img alt="Vorschau" src="https://img.youtube.com/vi/${esc(a.videoId)}/hqdefault.jpg" loading="lazy"><span class="play"><span>${ic('play')}</span></span></a></div>`;
+    }
+    case 'reddit': {
+      const u = safeUrl(a.url);
+      return u ? `<div class="att">${card('link', 'Reddit-Beitrag öffnen', u, u)}</div>` : '';
+    }
+    case 'link': {
+      const u = safeUrl(a.url);
+      return u ? `<div class="att">${card('link', 'Link öffnen', u, u)}</div>` : '';
+    }
+    case 'poll': {
+      const opts = a.options || [];
+      const total = opts.reduce((s, o) => s + (+o.votes || 0), 0);
+      const me = currentUser();
+      const mine = a.voted ? a.voted[me] : undefined;
+      const canVote = ctx.postId != null;
+      return `<div class="att poll"><strong>${esc(a.question)}</strong>${opts.map((o, i) => {
+        const pct = total ? Math.round((o.votes || 0) / total * 100) : 0;
+        const inner = `<span class="bar" style="width:${pct}%"></span><span>${esc(o.text)}</span><span class="num muted small">${o.votes || 0} · ${pct} %</span>`;
+        return canVote
+          ? `<button type="button" class="poll-opt ${mine === i ? 'mine' : ''}" data-act="vote" data-post="${esc(ctx.postId)}" data-reply="${esc(ctx.replyId ?? '')}" data-idx="${i}">${inner}</button>`
+          : `<div class="poll-opt">${inner}</div>`;
+      }).join('')}<span class="tiny muted">${total} Stimme${total === 1 ? '' : 'n'}</span></div>`;
+    }
+  }
+  return '';
+}
+
+
+/* =====================================================================
+   Karte: Standort, Umkreissuche (Overpass), Wetter, Ortsinfo
+   ===================================================================== */
+
+let mainMap = null, mainMarker = null, radiusCircle = null, poiLayer = null;
+let timelineMap = null, timelineLayer = null;
+let routeMap = null, routeLayer = null;
+
+const loc = { lat: 48.8566, lon: 2.3522, name: 'Paris', radius: 0.5 };
+const poiState = { list: [], osm: [], wiki: [], fetched: null, req: 0, tab: 'all', markers: new Map() };
+let locToken = 0, refreshTimer = null, radiusTimer = null;
+let enabledCats = Object.assign(Object.fromEntries(Object.entries(categoryConfig).map(([k, c]) => [k, c.on !== false])), store.get(K.cats, {}));
+
+/* Overpass-Server: Anfragen gestaffelt an mehrere Spiegel, die schnellste Antwort gewinnt. */
+const OVERPASS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter'
+];
+const MAX_MARKERS = 500, MAX_LIST = 300, FIRST_PHASE_KM = 1.5;
+
+/* ---------- Karte aufbauen ---------- */
+function initMainMap() {
+  if (mainMap) return;
+  mainMap = L.map('map').setView([loc.lat, loc.lon], 14);
+  addMapControls(mainMap);
+  mainMarker = L.marker([loc.lat, loc.lon], { draggable: true, icon: L.divIcon({ className: 'me-marker', html: '<span></span>', iconSize: [22, 22], iconAnchor: [11, 11] }), zIndexOffset: 1000 }).addTo(mainMap);
+  poiLayer = L.layerGroup().addTo(mainMap);
+  mainMarker.on('dragend', e => { const p = e.target.getLatLng(); setLocation(p.lat, p.lng, null); });
+  mainMap.on('click', e => setLocation(e.latlng.lat, e.latlng.lng, null));
+  updateRadiusCircle();
+}
+
+function setLocation(lat, lon, name, { zoom = true } = {}) {
+  loc.lat = lat; loc.lon = lon;
+  loc.name = name || null;
+  $('#locTitle').textContent = name || 'Gewählter Punkt';
+  $('#locSub').textContent = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+  if (mainMap) {
+    if (zoom) fitRadius(lat, lon);
+    else mainMap.panTo([lat, lon]);
+    mainMarker.setLatLng([lat, lon]);
+    setTimeout(() => mainMap.invalidateSize(), 150);
+  }
+  updateRadiusCircle();
+  store.set(K.last, { lat, lon, name: name || null });
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(refreshLocationData, 350);
+}
+
+/* Kartenausschnitt so wählen, dass der Such-Umkreis das Bild gut füllt */
+function fitRadius(lat = loc.lat, lon = loc.lon) {
+  if (!mainMap) return;
+  const dLat = loc.radius / 110.574, dLon = loc.radius / (111.320 * Math.max(0.05, Math.cos(lat * Math.PI / 180)));
+  mainMap.fitBounds([[lat - dLat, lon - dLon], [lat + dLat, lon + dLon]], { padding: [28, 28], maxZoom: 17 });
+}
+function updateRadiusCircle() {
+  if (!mainMap) return;
+  if (radiusCircle) mainMap.removeLayer(radiusCircle);
+  radiusCircle = L.circle([loc.lat, loc.lon], { radius: loc.radius * 1000, color: '#5b9dff', weight: 2, fillColor: '#5b9dff', fillOpacity: .12, interactive: false }).addTo(mainMap);
+}
+
+function refreshLocationData() {
+  const token = ++locToken;
+  loadWeather(token);
+  loadPois(true);
+  loadCityInfo(token);
+}
+
+/* ---------- Suche & GPS ---------- */
+async function useGps(onDone) {
+  try {
+    toast('GPS wird ermittelt …');
+    const p = await getPosition();
+    setLocation(p.coords.latitude, p.coords.longitude, null);
+    toast('GPS erfolgreich ermittelt.', 'ok');
+    if (onDone) onDone();
+  } catch (e) { toast(e.message, 'err'); }
+}
+function openNavigation(lat = loc.lat, lon = loc.lon) {
+  window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`, '_blank', 'noopener');
+}
+
+/* ---------- Radius ---------- */
+function onRadiusInput(v) {
+  loc.radius = parseFloat(v) || 0.5;
+  $('#radiusValue').textContent = String(loc.radius);
+  updateRadiusCircle();
+  renderPois();
+  clearTimeout(radiusTimer);
+  radiusTimer = setTimeout(() => { fitRadius(); loadPois(false); }, 600);   // Ausschnitt anpassen; nachladen nur, wenn der Radius größer wurde
+}
+
+/* ---------- Orte in der Nähe: OpenStreetMap (Overpass) + Wikipedia ---------- */
+const CAT_ORDER = Object.keys(categoryConfig).filter(k => k !== 'wiki').sort((a, b) => (categoryConfig[a].prio ?? 5) - (categoryConfig[b].prio ?? 5));
+const catVisibleAt = (k, r) => categoryConfig[k].maxKm >= r;
+
+/* Suchfenster (bbox) um den Punkt – der Server nutzt dafür seinen Index, das ist deutlich schneller als „around“. */
+function bboxFor(lat, lon, rKm) {
+  const dLat = rKm / 110.574, dLon = rKm / (111.320 * Math.max(0.05, Math.cos(lat * Math.PI / 180)));
+  return [lat - dLat, lon - dLon, lat + dLat, lon + dLon].map(v => +v.toFixed(5)).join(',');
+}
+function buildOverpassQuery(lat, lon, rKm, cap) {
+  const byKey = {};
+  Object.entries(categoryConfig).forEach(([k, c]) => {
+    if (k === 'wiki' || !catVisibleAt(k, rKm)) return;
+    Object.entries(c.tags).forEach(([key, v]) => {
+      if (byKey[key] === '*') return;
+      if (v === '*') byKey[key] = '*';
+      else byKey[key] = Array.from(new Set((byKey[key] || []).concat(v)));
+    });
+  });
+  const clauses = Object.entries(byKey).map(([key, v]) => v === '*' ? `  nwr["${key}"];` : `  nwr["${key}"~"^(${v.join('|')})$"];`);
+  return `[out:json][timeout:25][bbox:${bboxFor(lat, lon, rKm)}];(\n${clauses.join('\n')}\n);out body center qt ${cap};`;
+}
+
+function overpass(query) {
+  return new Promise((resolve, reject) => {
+    const ctls = [];
+    let settled = false, next = 0, failed = 0, last = null, stagger = 0, overall = 0;
+    const finish = (fn, v) => {
+      if (settled) return;
+      settled = true;
+      clearInterval(stagger); clearTimeout(overall);
+      ctls.forEach(c => c.abort());
+      fn(v);
+    };
+    const launch = () => {
+      if (settled || next >= OVERPASS.length) return;
+      const url = OVERPASS[next++], ctl = new AbortController();
+      ctls.push(ctl);
+      fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'data=' + encodeURIComponent(query), signal: ctl.signal })
+        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(d => {
+          if (d.remark && /timed out|out of memory|too many/i.test(d.remark) && !(d.elements || []).length) throw new Error(d.remark);
+          finish(resolve, d);
+        })
+        .catch(e => {
+          if (settled || ctl.signal.aborted) return;
+          last = e; failed++;
+          if (failed >= OVERPASS.length) finish(reject, last); else launch();
+        });
+    };
+    stagger = setInterval(launch, 2500);
+    overall = setTimeout(() => finish(reject, new Error('Zeitüberschreitung')), 32000);
+    launch();
+  });
+}
+
+function matchCat(cfg, t) {
+  if (!Object.entries(cfg.tags).some(([k, v]) => t[k] !== undefined && (v === '*' || v.includes(t[k])))) return false;
+  return !(cfg.reject && cfg.reject(t));
+}
+function categorize(t) { return CAT_ORDER.find(k => matchCat(categoryConfig[k], t)) || null; }
+
+function processPoiData(data, lat, lon) {
+  const seen = new Set(), out = [];
+  for (const el of data.elements || []) {
+    const t = el.tags || {};
+    const la = el.lat ?? el.center?.lat, lo = el.lon ?? el.center?.lon;
+    if (la == null || lo == null) continue;
+    const cat = categorize(t);
+    if (!cat) continue;
+    const cfg = categoryConfig[cat];
+    let name = t.name || t.brand || t.operator;
+    if (!name && cfg.unnamed) name = cfg.label;
+    if (!name) continue;
+    const key = el.type + el.id;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const street = t['addr:street'] ? `${t['addr:street']} ${t['addr:housenumber'] || ''}`.trim() : '';
+    const city = t['addr:city'] ? [t['addr:postcode'], t['addr:city']].filter(Boolean).join(' ') : '';
+    out.push({
+      id: key, name, lat: la, lon: lo, cat, dist: getDistanceKm(lat, lon, la, lo),
+      addr: [street, street ? '' : city].filter(Boolean).join(', '),
+      hours: t.opening_hours || '', phone: t.phone || t['contact:phone'] || '',
+      web: safeUrl(t.website || t['contact:website'] || '')
+    });
+  }
+  return out;
+}
+
+async function loadWiki(lat, lon, rKm) {
+  const m = Math.min(10000, Math.max(10, Math.round(rKm * 1000)));
+  const d = await fetchJson(`https://de.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${lat}%7C${lon}&gsradius=${m}&gslimit=60&format=json&origin=*`, {}, 9000);
+  return ((d.query && d.query.geosearch) || []).map(g => ({
+    id: 'w' + g.pageid, name: g.title, lat: g.lat, lon: g.lon, cat: 'wiki', dist: getDistanceKm(lat, lon, g.lat, g.lon),
+    addr: '', hours: '', phone: '', web: `https://de.wikipedia.org/?curid=${g.pageid}`
+  }));
+}
+
+function mergePois() {
+  const names = new Set(poiState.osm.map(p => p.name.toLowerCase()));
+  const wiki = poiState.wiki.filter(w => !names.has(w.name.toLowerCase()));
+  poiState.list = poiState.osm.concat(wiki).sort((a, b) => a.dist - b.dist);
+}
+
+function setPoiStatus(kind, text) {
+  const el = $('#poiStatus');
+  if (!el) return;
+  if (!kind) { el.hidden = true; el.innerHTML = ''; return; }
+  el.hidden = false;
+  el.className = 'poi-status ' + kind;
+  el.innerHTML = (kind === 'loading' ? '<span class="spinner"></span>' : '') + `<span class="grow">${esc(text)}</span>` +
+    (kind === 'err' ? '<button class="btn btn-soft btn-sm" data-act="poi-retry">Erneut versuchen</button>' : '');
+}
+
+const poiCache = new Map();
+async function loadPois(force) {
+  if (!mainMap) return;
+  const f = poiState.fetched;
+  const same = f && getDistanceKm(f.lat, f.lon, loc.lat, loc.lon) < 0.05;
+  if (!force && same && f.r >= loc.radius && !f.partial) { renderPois(); return; }
+  const req = ++poiState.req;
+  const lat = loc.lat, lon = loc.lon, r = loc.radius;
+  const ck = `${lat.toFixed(3)},${lon.toFixed(3)},${r}`;
+  if (!force && poiCache.has(ck)) {
+    const c = poiCache.get(ck);
+    Object.assign(poiState, { osm: c.osm, wiki: c.wiki, fetched: c.fetched });
+    mergePois(); renderPois(); setPoiStatus(c.note ? 'info' : null, c.note);
+    return;
+  }
+  if (!same) { poiState.osm = []; poiState.wiki = []; poiState.list = []; renderPois(); }
+  setPoiStatus('loading', 'Lade Orte in der Umgebung …');
+  setOverlay(true, 'Lade Orte in der Umgebung …');
+  loadWiki(lat, lon, r).then(w => { if (req === poiState.req) { poiState.wiki = w; mergePois(); renderPois(); } }).catch(() => {});
+  const phases = r > FIRST_PHASE_KM ? [FIRST_PHASE_KM, r] : [r];
+  let capped = false, shown = false;
+  try {
+    for (let i = 0; i < phases.length; i++) {
+      const pr = phases[i], cap = i === 0 ? 2500 : 4000;
+      const data = await overpass(buildOverpassQuery(lat, lon, pr, cap));
+      if (req !== poiState.req) return;
+      capped = (data.elements || []).length >= cap;
+      poiState.osm = processPoiData(data, lat, lon);
+      poiState.fetched = { lat, lon, r: pr, partial: i < phases.length - 1 };
+      mergePois(); renderPois();
+      shown = true;
+      setOverlay(false);
+      if (i < phases.length - 1) setPoiStatus('loading', `Orte bis ${pr} km sind da – lade weitere bis ${r} km …`);
+    }
+    const note = capped ? 'Sehr viele Treffer: Es wird nur ein Teil geladen. Verkleinere den Umkreis für mehr Details.' : (r > 5 ? 'Bei großem Umkreis werden nur größere Orte geladen (Unterkünfte, Sehenswertes, Bahnhöfe …). Kleinerer Umkreis zeigt mehr Details.' : '');
+    setPoiStatus(note ? 'info' : null, note);
+    poiCache.set(ck, { osm: poiState.osm, wiki: poiState.wiki, fetched: poiState.fetched, note });
+    if (poiCache.size > 8) poiCache.delete(poiCache.keys().next().value);
+  } catch {
+    if (req !== poiState.req) return;
+    setPoiStatus('err', shown ? 'Weitere Orte konnten nicht geladen werden.' : 'Orte konnten gerade nicht geladen werden (Server überlastet oder keine Verbindung).');
+  } finally {
+    if (req === poiState.req) setOverlay(false);
+  }
+}
+
+const poiActive = p => p.dist <= loc.radius && catVisibleAt(p.cat, loc.radius);
+const visiblePois = () => poiState.list.filter(p => poiActive(p) && enabledCats[p.cat]);
+
+function popupHtml(p) {
+  const c = categoryConfig[p.cat];
+  const lines = [`${c.emoji} ${esc(c.label)} · ${formatDistance(p.dist)}`];
+  if (p.addr) lines.push(esc(p.addr));
+  if (p.hours) lines.push('🕒 ' + esc(p.hours.length > 90 ? p.hours.slice(0, 90) + ' …' : p.hours));
+  if (p.phone) lines.push('📞 ' + esc(p.phone));
+  const links = [];
+  if (p.web) links.push(`<a href="${esc(p.web)}" target="_blank" rel="noopener noreferrer">${p.cat === 'wiki' ? 'Artikel lesen' : 'Webseite'} →</a>`);
+  links.push(`<a href="https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}" target="_blank" rel="noopener noreferrer">Route →</a>`);
+  return `<div class="pop-title">${esc(p.name)}</div><div class="pop-meta">${lines.join('<br>')}</div><div class="pop-links">${links.join('')}</div>`;
+}
+
+function renderPois() {
+  if (!poiLayer) return;
+  poiLayer.clearLayers();
+  poiState.markers.clear();
+  const inRadius = poiState.list.filter(poiActive);
+  const counts = {};
+  inRadius.forEach(p => { counts[p.cat] = (counts[p.cat] || 0) + 1; });
+  const shown = visiblePois();
+  shown.slice(0, MAX_MARKERS).forEach(p => {
+    const c = categoryConfig[p.cat];
+    const m = L.marker([p.lat, p.lon], { icon: emojiIcon(c.color, c.emoji), title: p.name }).addTo(poiLayer);
+    m.bindPopup(popupHtml(p));
+    poiState.markers.set(p.id, m);
+  });
+  const groups = CAT_GROUPS.map((g, gi) => {
+    const chips = Object.entries(categoryConfig).filter(([k, c]) => c.g === gi && counts[k]).map(([k, c]) =>
+      `<button class="chip" data-act="poi-cat" data-cat="${k}" aria-pressed="${!!enabledCats[k]}">${c.emoji} ${esc(c.label)} <b>${counts[k]}</b></button>`).join('');
+    return chips ? `<div class="poi-group"><h4>${esc(g)}</h4><div class="chips">${chips}</div></div>` : '';
+  }).join('');
+  $('#poiChips').innerHTML = groups
+    ? `<div class="row" style="gap:8px"><button class="btn btn-ghost btn-sm" data-act="poi-all" data-on="1">Alle an</button><button class="btn btn-ghost btn-sm" data-act="poi-all" data-on="0">Alle aus</button></div>${groups}`
+    : '<p class="muted small">Noch keine Orte gefunden. Vergrößere den Umkreis oder wähle einen anderen Punkt.</p>';
+  $('#poiTotal').textContent = inRadius.length ? `· ${shown.length} von ${inRadius.length}` : '';
+  if (shown.length > MAX_MARKERS) $('#poiTotal').textContent += ` (Karte zeigt die nächsten ${MAX_MARKERS})`;
+  if (openModals.includes('poiModal')) renderPoiList();
+}
+function togglePoiCat(k) {
+  enabledCats[k] = !enabledCats[k];
+  store.set(K.cats, enabledCats);
+  renderPois();
+}
+function setAllPoiCats(on) {
+  Object.keys(categoryConfig).forEach(k => { enabledCats[k] = on; });
+  store.set(K.cats, enabledCats);
+  renderPois();
+}
+
+/* Liste im Dialog */
+function openPoiList() {
+  poiState.tab = 'all';
+  $('#poiSearchInput').value = '';
+  renderPoiList();
+  openModal('poiModal');
+}
+function renderPoiList() {
+  const q = $('#poiSearchInput').value.trim().toLowerCase();
+  const base = poiState.list.filter(poiActive);
+  $('#poiTabs').innerHTML = `<button class="chip" data-act="poi-tab" data-tab="all" aria-pressed="${poiState.tab === 'all'}">Alle <b>${base.length}</b></button>` +
+    Object.entries(categoryConfig).map(([k, c]) => {
+      const n = base.filter(p => p.cat === k).length;
+      return n ? `<button class="chip" data-act="poi-tab" data-tab="${k}" aria-pressed="${poiState.tab === k}">${c.emoji} ${esc(c.label)} <b>${n}</b></button>` : '';
+    }).join('');
+  const rows = base.filter(p => (poiState.tab === 'all' || p.cat === poiState.tab) && (p.name.toLowerCase().includes(q) || categoryConfig[p.cat].label.toLowerCase().includes(q)));
+  const box = $('#poiList');
+  if (!rows.length) { box.innerHTML = '<div class="empty"><div class="big">🔍</div>Keine Orte im Umkreis gefunden.</div>'; return; }
+  box.innerHTML = rows.slice(0, MAX_LIST).map(p => {
+    const c = categoryConfig[p.cat];
+    return `<div class="poi-item"><button class="row grow" style="background:none;border:0;text-align:left;padding:0;gap:12px" data-act="poi-focus" data-id="${esc(p.id)}">
+      <span class="ico" style="background:${c.color}">${c.emoji}</span>
+      <span class="grow"><span class="t">${esc(p.name)}</span><br><span class="muted small">${esc(c.label)}${p.addr ? ' · ' + esc(p.addr) : ''} · ${formatDistance(p.dist)}</span></span></button>
+      <button class="btn btn-soft btn-icon btn-sm" data-act="poi-nav" data-lat="${p.lat}" data-lon="${p.lon}" aria-label="Route zu ${esc(p.name)}">${ic('nav')}</button></div>`;
+  }).join('') + (rows.length > MAX_LIST ? `<p class="hint" style="text-align:center">Es werden die nächsten ${MAX_LIST} von ${rows.length} Orten angezeigt – Suche nutzen, um weiter einzugrenzen.</p>` : '');
+}
+function focusPoi(id) {
+  const p = poiState.list.find(x => x.id === id);
+  if (!p || !mainMap) return;
+  closeModal('poiModal');
+  showView('map');
+  setTimeout(() => {
+    mainMap.setView([p.lat, p.lon], 17);
+    const m = poiState.markers.get(id);
+    if (m) m.openPopup();
+    else L.popup().setLatLng([p.lat, p.lon]).setContent(`<div class="pop-title">${esc(p.name)}</div>`).openOn(mainMap);
+  }, 120);
+}
+
+/* ---------- Wetter (Open-Meteo) ---------- */
+const WMO = {
+  0: ['☀️', 'Klar'], 1: ['🌤️', 'Überwiegend klar'], 2: ['⛅', 'Teils bewölkt'], 3: ['☁️', 'Bedeckt'],
+  45: ['🌫️', 'Nebel'], 48: ['🌫️', 'Reifnebel'], 51: ['🌦️', 'Leichter Niesel'], 53: ['🌦️', 'Nieselregen'], 55: ['🌧️', 'Starker Niesel'],
+  56: ['🌧️', 'Gefrierender Niesel'], 57: ['🌧️', 'Gefrierender Niesel'], 61: ['🌧️', 'Leichter Regen'], 63: ['🌧️', 'Regen'], 65: ['🌧️', 'Starker Regen'],
+  66: ['🌧️', 'Gefrierender Regen'], 67: ['🌧️', 'Gefrierender Regen'], 71: ['🌨️', 'Leichter Schnee'], 73: ['🌨️', 'Schnee'], 75: ['❄️', 'Starker Schnee'],
+  77: ['🌨️', 'Schneegriesel'], 80: ['🌦️', 'Regenschauer'], 81: ['🌦️', 'Regenschauer'], 82: ['⛈️', 'Starke Schauer'], 85: ['🌨️', 'Schneeschauer'],
+  86: ['🌨️', 'Schneeschauer'], 95: ['⛈️', 'Gewitter'], 96: ['⛈️', 'Gewitter mit Hagel'], 99: ['⛈️', 'Gewitter mit Hagel']
+};
+const wmo = c => WMO[c] || ['🌡️', 'Unbekannt'];
+const COMPASS = ['N', 'NO', 'O', 'SO', 'S', 'SW', 'W', 'NW'];
+const compass = deg => COMPASS[Math.round((((deg % 360) + 360) % 360) / 45) % 8];
+const deg1 = n => Math.round(n);
+
+async function loadWeather(token) {
+  const now = $('#wxNow'), wind = $('#windBox');
+  now.className = 'skeleton'; now.innerHTML = '';
+  wind.className = 'skeleton'; wind.innerHTML = '';
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat.toFixed(4)}&longitude=${loc.lon.toFixed(4)}` +
+      '&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m' +
+      '&hourly=temperature_2m,weather_code,precipitation_probability&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max' +
+      '&timezone=auto&forecast_days=7';
+    const d = await fetchJson(url, {}, 12000);
+    if (token !== locToken) return;
+    renderWeather(d);
+  } catch {
+    if (token !== locToken) return;
+    now.className = ''; now.innerHTML = '<p class="muted small">Wetterdaten sind gerade nicht verfügbar.</p>';
+    wind.className = ''; wind.innerHTML = '<p class="muted small">–</p>';
+    $('#wxHours').innerHTML = ''; $('#wxDays').innerHTML = '';
+  }
+}
+function renderWeather(d) {
+  const c = d.current, [em, label] = wmo(c.weather_code);
+  const now = $('#wxNow');
+  now.className = '';
+  now.innerHTML = `<div class="wx-now"><span class="wx-emoji">${em}</span><div><div class="wx-temp num">${deg1(c.temperature_2m)}°</div><div class="muted">${esc(label)}</div></div></div>
+    <div class="wx-stats"><div class="stat"><span>Gefühlt</span><strong>${deg1(c.apparent_temperature)}°</strong></div>
+    <div class="stat"><span>Luftfeuchte</span><strong>${deg1(c.relative_humidity_2m)} %</strong></div>
+    <div class="stat"><span>Regenrisiko</span><strong>${deg1(d.daily.precipitation_probability_max?.[0] ?? 0)} %</strong></div></div>`;
+  $('#wxPlace').textContent = (d.timezone || '').replace(/_/g, ' ');
+
+  const start = Math.max(0, d.hourly.time.findIndex(t => t >= String(c.time).slice(0, 13) + ':00'));
+  $('#wxHours').innerHTML = d.hourly.time.slice(start, start + 24).map((t, i) => {
+    const k = start + i;
+    return `<div class="wx-hour"><span class="muted">${t.slice(11, 16)}</span><span class="e">${wmo(d.hourly.weather_code[k])[0]}</span><b>${deg1(d.hourly.temperature_2m[k])}°</b><span class="tiny muted">${d.hourly.precipitation_probability?.[k] ?? 0} %</span></div>`;
+  }).join('');
+  $('#wxDays').innerHTML = d.daily.time.map((t, i) => {
+    const day = new Date(t + 'T12:00').toLocaleDateString('de-DE', { weekday: 'short' });
+    return `<div class="wx-day"><strong>${i === 0 ? 'Heute' : day}</strong><span class="e">${wmo(d.daily.weather_code[i])[0]}</span><span class="rain">💧 ${d.daily.precipitation_probability_max?.[i] ?? 0} %</span><span class="num"><b>${deg1(d.daily.temperature_2m_max[i])}°</b><em>${deg1(d.daily.temperature_2m_min[i])}°</em></span></div>`;
+  }).join('');
+
+  const w = $('#windBox');
+  w.className = '';
+  w.innerHTML = `<div class="wind-box"><div class="compass" aria-hidden="true"><span class="n">N</span><span class="o">O</span><span class="s">S</span><span class="w">W</span><i style="transform:rotate(${(c.wind_direction_10m + 180) % 360}deg)"></i></div>
+    <div><div class="wx-temp num" style="font-size:2rem">${deg1(c.wind_speed_10m)} <span class="muted" style="font-size:1rem;font-weight:600">km/h</span></div>
+    <div class="muted small">aus ${compass(c.wind_direction_10m)} (${deg1(c.wind_direction_10m)}°) · Böen bis ${deg1(c.wind_gusts_10m)} km/h</div></div></div>`;
+}
+
+/* ---------- Ortsinfo (Reverse-Geocoding + Wikipedia) ---------- */
+async function loadCityInfo(token) {
+  const desc = $('#cityDesc'), link = $('#cityLink');
+  link.hidden = true;
+  desc.textContent = 'Lade Ortsinformationen …';
+  try {
+    const r = await reverseGeocode(loc.lat, loc.lon);
+    if (token !== locToken) return;
+    const a = r.address || {};
+    const city = a.city || a.town || a.village || a.municipality || a.hamlet || a.county || '';
+    if (!loc.name) {
+      loc.name = shortName(r);
+      $('#locTitle').textContent = loc.name;
+      store.set(K.last, { lat: loc.lat, lon: loc.lon, name: loc.name });
+    }
+    $('#cityTitle').textContent = city || 'Über den Ort';
+    if (!city) { desc.textContent = r.display_name || 'Keine Ortsinformationen verfügbar.'; return; }
+    try {
+      const w = await fetchJson(`https://de.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(city.replace(/ /g, '_'))}`, {}, 10000);
+      if (token !== locToken) return;
+      if (w.type === 'disambiguation' || !w.extract) throw new Error('keine Zusammenfassung');
+      desc.textContent = w.extract.length > 480 ? w.extract.slice(0, 480).replace(/\s+\S*$/, '') + ' …' : w.extract;
+      const href = safeUrl(w.content_urls?.desktop?.page);
+      if (href) { link.href = href; link.hidden = false; }
+    } catch {
+      if (token !== locToken) return;
+      desc.textContent = r.display_name || 'Keine Beschreibung gefunden.';
+    }
+  } catch {
+    if (token !== locToken) return;
+    desc.textContent = 'Ortsinformationen konnten nicht geladen werden.';
+  }
+}
+
+
+/* =====================================================================
+   Nachrichtenverlauf: Beiträge, Antworten, Umfragen
+   ===================================================================== */
+
+const getPosts = () => store.get(K.posts, []);
+const savePosts = list => store.set(K.posts, list);
+const postText = p => p.text ?? p.content ?? p.message ?? '';
+
+function renderPosts() {
+  const feed = $('#postFeed');
+  const posts = getPosts().slice().sort((a, b) => String(b.ts || b.date || '').localeCompare(String(a.ts || a.date || '')));
+  if (!posts.length) {
+    feed.innerHTML = '<div class="card empty"><div class="big">💬</div><strong>Noch keine Nachrichten</strong><p class="small">Teile oben deinen ersten Beitrag – mit Foto, Standort oder Umfrage.</p></div>';
+    return;
+  }
+  const author = (u, cls = '') => `<span class="avatar ${cls}" aria-hidden="true">${esc(String(u || '?').charAt(0))}</span>`;
+  feed.innerHTML = posts.map(p => {
+    const replies = (p.replies || []).map(r => `<div class="reply">
+        <div class="post-head">${author(r.user, 'sm')}<div class="grow"><strong class="small">${esc(r.user || 'Gast')}</strong> <span class="muted tiny">${esc(timeAgo(r.ts || r.date))}</span></div>
+          ${canDelete(r) ? `<button class="btn btn-ghost btn-icon btn-sm" data-act="reply-del" data-post="${esc(p.id)}" data-reply="${esc(r.id)}" aria-label="Antwort löschen">${ic('trash')}</button>` : ''}</div>
+        ${postText(r) ? `<div class="post-text small">${linkify(postText(r))}</div>` : ''}
+        ${attHtml(r.attachment, { postId: p.id, replyId: r.id })}
+      </div>`).join('');
+    return `<article class="card post">
+      <div class="post-head">${author(p.user)}<div class="grow"><strong>${esc(p.user || 'Gast')}</strong><div class="muted tiny">${esc(timeAgo(p.ts || p.date))}</div></div></div>
+      ${postText(p) ? `<div class="post-text">${linkify(postText(p))}</div>` : ''}
+      ${attHtml(p.attachment, { postId: p.id })}
+      <div class="post-actions">
+        <button class="btn btn-soft btn-sm" data-act="reply-open" data-post="${esc(p.id)}">${ic('reply')}Antworten${p.replies?.length ? ` (${p.replies.length})` : ''}</button>
+        ${canDelete(p) ? `<button class="btn btn-ghost btn-sm" data-act="post-del" data-post="${esc(p.id)}">${ic('trash')}Löschen</button>` : ''}
+      </div>
+      ${replies ? `<div class="replies">${replies}</div>` : ''}
+    </article>`;
+  }).join('');
+  hydrateMedia(feed);
+}
+
+function savePost() {
+  const text = $('#postText').value.trim();
+  const att = drafts.post;
+  if (!text && !att) { toast('Bitte Text eingeben oder etwas anhängen.', 'err'); return; }
+  const list = getPosts();
+  list.unshift({ id: uid(), user: currentUser(), text, ts: new Date().toISOString(), attachment: takeDraft('post'), replies: [] });
+  if (!savePosts(list)) return;
+  $('#postText').value = '';
+  renderPosts();
+  toast('Beitrag veröffentlicht.', 'ok');
+}
+
+let replyPostId = null;
+function openReply(postId) {
+  replyPostId = postId;
+  $('#replyText').value = '';
+  clearDraft('reply');
+  onClose.replyModal = () => clearDraft('reply');
+  openModal('replyModal');
+}
+function saveReply() {
+  const text = $('#replyText').value.trim();
+  const att = drafts.reply;
+  if (!text && !att) { toast('Bitte Text eingeben oder etwas anhängen.', 'err'); return; }
+  const list = getPosts();
+  const p = list.find(x => String(x.id) === String(replyPostId));
+  if (!p) { toast('Beitrag nicht gefunden.', 'err'); closeModal('replyModal'); return; }
+  (p.replies = p.replies || []).push({ id: uid(), user: currentUser(), text, ts: new Date().toISOString(), attachment: takeDraft('reply') });
+  if (!savePosts(list)) return;
+  closeModal('replyModal');
+  renderPosts();
+  toast('Antwort hinzugefügt.', 'ok');
+}
+
+async function deletePost(id) {
+  const mine = getPosts().find(x => String(x.id) === String(id));
+  if (!mine || !canDelete(mine)) { toast('Diesen Beitrag darfst du nicht löschen.', 'err'); return; }
+  if (!await confirmDialog('Beitrag löschen?', 'Der Beitrag und alle Antworten werden entfernt.')) return;
+  const list = getPosts();
+  const p = list.find(x => String(x.id) === String(id));
+  if (p) { dropMedia(normAtt(p.attachment)); (p.replies || []).forEach(r => dropMedia(normAtt(r.attachment))); }
+  savePosts(list.filter(x => String(x.id) !== String(id)));
+  renderPosts();
+}
+async function deleteReply(postId, replyId) {
+  const pp = getPosts().find(x => String(x.id) === String(postId)), rr = pp && (pp.replies || []).find(x => String(x.id) === String(replyId));
+  if (!rr || !canDelete(rr)) { toast('Diese Antwort darfst du nicht löschen.', 'err'); return; }
+  if (!await confirmDialog('Antwort löschen?', 'Diese Antwort wird entfernt.')) return;
+  const list = getPosts();
+  const p = list.find(x => String(x.id) === String(postId));
+  if (!p) return;
+  const r = (p.replies || []).find(x => String(x.id) === String(replyId));
+  if (r) dropMedia(normAtt(r.attachment));
+  p.replies = (p.replies || []).filter(x => String(x.id) !== String(replyId));
+  savePosts(list);
+  renderPosts();
+}
+
+function votePoll(postId, replyId, idx) {
+  const list = getPosts();
+  const p = list.find(x => String(x.id) === String(postId));
+  if (!p) return;
+  const holder = replyId ? (p.replies || []).find(r => String(r.id) === String(replyId)) : p;
+  const att = holder && normAtt(holder.attachment);
+  if (!att || att.type !== 'poll') return;
+  holder.attachment = att;
+  att.voted = att.voted || {};
+  const me = currentUser();
+  const prev = att.voted[me];
+  if (prev === idx) return;                                  // gleiche Option nochmal: nichts tun
+  if (prev != null && att.options[prev]) att.options[prev].votes = Math.max(0, (att.options[prev].votes || 0) - 1);
+  att.options[idx].votes = (att.options[idx].votes || 0) + 1;
+  att.voted[me] = idx;
+  savePosts(list);
+  renderPosts();
+}
+
+
+/* =====================================================================
+   Reisen: Tagebucheinträge, Strecken, Chronik, Reisekarte
+   ===================================================================== */
+
+const getEntries = () => store.get(K.entries, []);
+const getRoutes = () => store.get(K.routes, []);
+const travelUi = { year: 'all', move: Object.fromEntries(Object.keys(movementConfig).map(k => [k, true])) };
+
+/* ---------- Reisekarte ---------- */
+function initTimelineMap() {
+  if (timelineMap) return;
+  timelineMap = L.map('timelineMap').setView([loc.lat, loc.lon], 5);
+  addMapControls(timelineMap);
+  timelineLayer = L.layerGroup().addTo(timelineMap);
+}
+const years = () => {
+  const s = new Set();
+  [...getRoutes(), ...getEntries()].forEach(x => { if (x.date && /^\d{4}/.test(x.date)) s.add(x.date.slice(0, 4)); });
+  return [...s].sort().reverse();
+};
+function filteredTravel() {
+  const y = travelUi.year;
+  const byYear = x => y === 'all' || (x.date || '').startsWith(y);
+  return {
+    routes: getRoutes().filter(r => byYear(r) && travelUi.move[r.movementType || 'car'] !== false),
+    entries: getEntries().filter(byYear),
+    allRoutesOfYear: getRoutes().filter(byYear)
+  };
+}
+
+function renderTravel() {
+  const ys = years();
+  if (travelUi.year !== 'all' && !ys.includes(travelUi.year)) travelUi.year = 'all';
+  $('#yearChips').innerHTML = ['all', ...ys].map(y => `<button class="chip" data-act="year" data-year="${y}" aria-pressed="${travelUi.year === y}">${y === 'all' ? 'Alle Jahre' : y}</button>`).join('');
+  const { routes, entries, allRoutesOfYear } = filteredTravel();
+
+  // Statistik pro Fortbewegungsart
+  const sums = {};
+  allRoutesOfYear.forEach(r => { const t = r.movementType || 'car'; sums[t] = (sums[t] || 0) + (+r.distanceKm || 0); });
+  const total = routes.reduce((s, r) => s + (+r.distanceKm || 0), 0);
+  const tiles = Object.entries(sums).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1])
+    .map(([t, v]) => `<div class="stat-tile"><div class="k">${moveCfg(t).icon} ${esc(moveCfg(t).label)}</div><div class="v">${formatDistance(v)}</div></div>`).join('');
+  $('#distStats').innerHTML = `<div class="stat-tile total"><div class="k">${ic('route')} Gesamt (Luftlinie)</div><div class="v">${formatDistance(total)}</div></div>` + tiles +
+    `<div class="stat-tile"><div class="k">${ic('book')} Einträge</div><div class="v">${entries.length}</div></div>`;
+  $('#moveChips').innerHTML = Object.entries(movementConfig).map(([k, c]) =>
+    `<button class="chip" data-act="move" data-move="${k}" aria-pressed="${travelUi.move[k] !== false}">${c.icon} ${esc(c.label)}</button>`).join('');
+
+  renderTimelineOnMap(routes, entries);
+  renderChronicle(routes, entries);
+}
+
+function renderTimelineOnMap(routes, entries) {
+  if (!timelineMap) return;
+  timelineLayer.clearLayers();
+  const bounds = [];
+  routes.forEach(r => {
+    const cfg = moveCfg(r.movementType), pts = (r.points || []).filter(p => p.lat != null);
+    if (!pts.length) return;
+    L.polyline(pts.map(p => [p.lat, p.lon]), { color: cfg.color, weight: 4, opacity: .85 }).addTo(timelineLayer);
+    pts.forEach((p, i) => {
+      const m = L.marker([p.lat, p.lon], { icon: numIcon(cfg.color, i + 1) }).addTo(timelineLayer);
+      m.bindPopup(`<div class="pop-title">${esc(p.title || 'Station ' + (i + 1))}</div><div class="pop-meta">${cfg.icon} ${esc(r.title || 'Tour')}${dtLabel(p.date, p.time) ? '<br>🕒 ' + esc(dtLabel(p.date, p.time)) : ''}</div>${p.note ? `<div style="margin-top:6px">${esc(p.note)}</div>` : ''}`);
+      bounds.push([p.lat, p.lon]);
+    });
+  });
+  entries.forEach(e => {
+    if (e.lat == null) return;
+    const m = L.marker([e.lat, e.lon], { icon: emojiIcon('#5b9dff', '📍') }).addTo(timelineLayer);
+    m.bindPopup(`<div class="pop-title">${esc(e.title)}</div><div class="pop-meta">${esc(e.address || '')}${dtLabel(e.date, e.time) ? '<br>🕒 ' + esc(dtLabel(e.date, e.time)) : ''}</div>${e.desc ? `<div style="margin-top:6px">${esc(e.desc)}</div>` : ''}`);
+    bounds.push([e.lat, e.lon]);
+  });
+  if (bounds.length) timelineMap.fitBounds(bounds, { padding: [40, 40], maxZoom: 13 });
+}
+
+function renderChronicle(routes, entries) {
+  const items = [
+    ...routes.map(r => ({ kind: 'route', key: sortKey(r.date, r.time), r })),
+    ...entries.map(e => ({ kind: 'entry', key: sortKey(e.date, e.time), e }))
+  ].sort((a, b) => b.key.localeCompare(a.key));
+  const box = $('#chronicle');
+  if (!items.length) {
+    box.innerHTML = '<div class="card empty"><div class="big">🧭</div><strong>Noch keine Reisen</strong><p class="small">Zeichne deine erste Strecke oder halte einen Ort im Tagebuch fest.</p></div>';
+    return;
+  }
+  box.innerHTML = items.map(it => it.kind === 'route' ? routeCard(it.r) : entryCard(it.e)).join('');
+  hydrateMedia(box);
+}
+function routeCard(r) {
+  const cfg = moveCfg(r.movementType), pts = r.points || [];
+  const closed = pts.length > 2 && pts[0].lat === pts[pts.length - 1].lat && pts[0].lon === pts[pts.length - 1].lon;
+  const stations = pts.map((p, i) => {
+    const seg = i < pts.length - 1 ? `<div class="st-seg">${cfg.icon} ${formatDistance(getDistanceKm(p.lat, p.lon, pts[i + 1].lat, pts[i + 1].lon))}</div>` : '';
+    if (closed && i === pts.length - 1) return `<div class="station" style="--c:${cfg.color}"><span class="dot">${ic('loop')}</span><div class="st-body"><div class="st-title muted">Zurück zum Start</div></div></div>`;
+    const when = dtLabel(p.date, p.time);
+    return `<div class="station" style="--c:${cfg.color}"><span class="dot">${i + 1}</span>
+      <div class="st-body"><div><span class="st-title">${esc(p.title || 'Station ' + (i + 1))}</span> ${when ? `<span class="badge">${ic('clock')} ${esc(when)}</span>` : ''}</div>
+      ${p.note ? `<div class="muted small">${esc(p.note)}</div>` : ''}${attHtml(p.attachment)}</div>${seg}</div>`;
+  }).join('');
+  const when = dtLabel(r.date, r.time);
+  return `<article class="card log-item">
+    <div class="log-head"><span class="log-ico" style="background:${cfg.color}26">${cfg.icon}</span>
+      <div class="grow"><strong>${esc(r.title || 'Tour')}</strong>
+        <div class="row wrap" style="gap:6px;margin-top:4px"><span class="badge ok">${formatDistance(+r.distanceKm || 0)}</span><span class="badge">${esc(cfg.label)}</span>${when ? `<span class="badge">${ic('calendar')} ${esc(when)}</span>` : ''}${authorBadge(r)}</div></div>
+      <button class="btn btn-ghost btn-icon btn-sm" data-act="route-focus" data-id="${esc(r.id)}" aria-label="Auf Karte zeigen">${ic('target')}</button>
+      ${canDelete(r) ? `<button class="btn btn-ghost btn-icon btn-sm" data-act="route-del" data-id="${esc(r.id)}" aria-label="Strecke löschen">${ic('trash')}</button>` : ''}</div>
+    <div class="stations">${stations}</div></article>`;
+}
+function entryCard(e) {
+  const when = dtLabel(e.date, e.time);
+  return `<article class="card log-item">
+    <div class="log-head"><span class="log-ico" style="background:var(--accent-soft)">📍</span>
+      <div class="grow"><strong>${esc(e.title)}</strong>
+        <div class="row wrap" style="gap:6px;margin-top:4px">${e.address ? `<span class="badge ok">${ic('pin')} ${esc(e.address)}</span>` : ''}${when ? `<span class="badge">${ic('calendar')} ${esc(when)}</span>` : ''}${authorBadge(e)}</div></div>
+      <button class="btn btn-ghost btn-icon btn-sm" data-act="entry-focus" data-id="${esc(e.id)}" aria-label="Auf Karte zeigen">${ic('target')}</button>
+      ${canDelete(e) ? `<button class="btn btn-ghost btn-icon btn-sm" data-act="entry-del" data-id="${esc(e.id)}" aria-label="Eintrag löschen">${ic('trash')}</button>` : ''}</div>
+    ${e.desc ? `<div class="post-text">${linkify(e.desc)}</div>` : ''}${attHtml(e.attachment)}</article>`;
+}
+function focusOnTravelMap(latlngs) {
+  if (!timelineMap || !latlngs.length) return;
+  $('#timelineMap').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  setTimeout(() => { timelineMap.invalidateSize(); timelineMap.fitBounds(latlngs, { padding: [50, 50], maxZoom: 15 }); }, 250);
+}
+async function deleteRoute(id) {
+  const mine = getRoutes().find(x => String(x.id) === String(id));
+  if (!mine || !canDelete(mine)) { toast('Diese Strecke darfst du nicht löschen.', 'err'); return; }
+  if (!await confirmDialog('Strecke löschen?', 'Die Strecke samt Stationen wird entfernt.')) return;
+  const list = getRoutes();
+  const r = list.find(x => String(x.id) === String(id));
+  if (r) (r.points || []).forEach(p => dropMedia(normAtt(p.attachment)));
+  store.set(K.routes, list.filter(x => String(x.id) !== String(id)));
+  renderTravel();
+}
+async function deleteEntry(id) {
+  const mine = getEntries().find(x => String(x.id) === String(id));
+  if (!mine || !canDelete(mine)) { toast('Diesen Eintrag darfst du nicht löschen.', 'err'); return; }
+  if (!await confirmDialog('Eintrag löschen?', 'Der Tagebucheintrag wird entfernt.')) return;
+  const list = getEntries();
+  const e = list.find(x => String(x.id) === String(id));
+  if (e) dropMedia(normAtt(e.attachment));
+  store.set(K.entries, list.filter(x => String(x.id) !== String(id)));
+  renderTravel();
+}
+
+/* ---------- Tagebucheintrag ---------- */
+const entryGeo = { lat: null, lon: null, addr: '' };
+function openEntryModal() {
+  ['entryAddress', 'entryTitle', 'entryTime', 'entryDesc'].forEach(id => { $('#' + id).value = ''; });
+  $('#entryDate').value = todayISO();
+  $('#entryGeoState').textContent = '';
+  Object.assign(entryGeo, { lat: null, lon: null, addr: '' });
+  clearDraft('travel');
+  onClose.entryModal = () => clearDraft('travel');
+  openModal('entryModal');
+}
+async function resolveEntryAddress(silent) {
+  const addr = $('#entryAddress').value.trim();
+  if (!addr) return false;
+  if (entryGeo.lat != null && entryGeo.addr === addr) return true;
+  const hint = $('#entryGeoState');
+  hint.textContent = 'Suche Ort …';
+  try {
+    const g = await geocode(addr);
+    if (!g) { hint.textContent = '⚠️ Ort nicht gefunden – bitte genauer eingeben.'; if (!silent) toast('Ort nicht gefunden.', 'err'); return false; }
+    Object.assign(entryGeo, { lat: g.lat, lon: g.lon, addr });
+    hint.textContent = '✓ Gefunden: ' + g.name;
+    return true;
+  } catch {
+    hint.textContent = '⚠️ Suche fehlgeschlagen.';
+    if (!silent) toast('Ortssuche fehlgeschlagen – Internetverbindung prüfen.', 'err');
+    return false;
+  }
+}
+function pickEntryPlace(it) {
+  const addr = [it.title, ...String(it.label || '').split(', ').slice(0, 2)].filter(Boolean).join(', ');
+  $('#entryAddress').value = addr;
+  Object.assign(entryGeo, { lat: it.lat, lon: it.lon, addr });
+  $('#entryGeoState').textContent = '✓ Ort übernommen';
+}
+async function entryUseGps() {
+  try {
+    toast('GPS wird ermittelt …');
+    const p = await getPosition();
+    const lat = p.coords.latitude, lon = p.coords.longitude;
+    let label = 'Aktueller GPS-Standort';
+    try { label = shortName(await reverseGeocode(lat, lon)); } catch { /* Standardtext */ }
+    $('#entryAddress').value = label;
+    Object.assign(entryGeo, { lat, lon, addr: label });
+    $('#entryGeoState').textContent = '✓ GPS-Position übernommen';
+  } catch (e) { toast(e.message, 'err'); }
+}
+async function saveEntry() {
+  const title = $('#entryTitle').value.trim();
+  const address = $('#entryAddress').value.trim();
+  if (!title || !address) { toast('Bitte Titel und Ort eingeben.', 'err'); return; }
+  if (!await resolveEntryAddress(false)) return;     // nie stillschweigend einen falschen Ort verwenden
+  const list = getEntries();
+  list.unshift({
+    id: uid(), user: currentUser(), title, address, desc: $('#entryDesc').value.trim(),
+    date: $('#entryDate').value || todayISO(), time: $('#entryTime').value || '',
+    lat: entryGeo.lat, lon: entryGeo.lon, attachment: takeDraft('travel')
+  });
+  if (!store.set(K.entries, list)) return;
+  closeModal('entryModal');
+  renderTravel();
+  toast('Tagebucheintrag gespeichert.', 'ok');
+}
+
+/* ---------- Streckenplaner ---------- */
+let drawn = [];            // Nadeln der aktuellen Strecke
+let editingPin = -1;
+let routeSaved = false;
+
+function openRouteModal() {
+  drawn = []; routeSaved = false;
+  $('#routeMovementType').innerHTML = Object.entries(movementConfig).map(([k, c]) => `<option value="${k}">${c.icon} ${esc(c.label)}</option>`).join('');
+  $('#drawModalTitle').value = ''; $('#drawModalTime').value = '';
+  $('#drawModalDate').value = todayISO();
+  $('#routeSearchInput').value = '';
+  onClose.routeModal = () => { if (!routeSaved) uniquePins().forEach(p => dropMedia(p.attachment)); drawn = []; };
+  openModal('routeModal');
+  setTimeout(() => {
+    if (!routeMap) {
+      routeMap = L.map('routeDrawMap').setView([loc.lat, loc.lon], 13);
+      addMapControls(routeMap);
+      routeLayer = L.layerGroup().addTo(routeMap);
+      routeMap.on('click', e => addDrawnPoint(e.latlng.lat, e.latlng.lng));
+    } else routeMap.setView([loc.lat, loc.lon], 13);
+    routeMap.invalidateSize();
+    redrawRoute();
+  }, 280);
+  redrawRoute();
+}
+const uniquePins = () => [...new Set(drawn)];
+const routeDistance = () => drawn.reduce((s, p, i) => i ? s + getDistanceKm(drawn[i - 1].lat, drawn[i - 1].lon, p.lat, p.lon) : 0, 0);
+const isClosed = () => drawn.length > 2 && drawn[0] === drawn[drawn.length - 1];
+
+function addDrawnPoint(lat, lon, title = 'Station') {
+  if (isClosed()) drawn.pop();           // Rundweg wird geöffnet, sobald eine neue Nadel dazukommt
+  const n = uniquePins().length + 1;
+  drawn.push({ lat, lon, title: `${title} ${n}`, note: '', attachment: null, date: '', time: '' });
+  redrawRoute();
+}
+function redrawRoute() {
+  const list = $('#pinsListContainer');
+  const pins = uniquePins();
+  const total = routeDistance();
+  $('#pinStatusIndicator').textContent = pins.length
+    ? `${pins.length} Nadel${pins.length === 1 ? '' : 'n'} · ${formatDistance(total)} Luftlinie${isClosed() ? ' · Rundweg' : ''}`
+    : 'Tippe auf die Karte oder nutze die Buttons, um Nadeln zu setzen.';
+  list.innerHTML = pins.map((p, i) => `<div class="pin-row"><span class="n">${i + 1}</span>
+    <div class="grow"><strong class="small">${esc(p.title)}</strong><div class="tiny muted num">${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}${p.attachment ? ' · 📎' : ''}</div></div>
+    <button class="btn btn-soft btn-icon btn-sm" data-act="pin-edit" data-idx="${i}" aria-label="Station bearbeiten">${ic('edit')}</button>
+    <button class="btn btn-danger btn-icon btn-sm" data-act="pin-remove" data-idx="${i}" aria-label="Nadel entfernen">${ic('trash')}</button></div>`).join('');
+  if (!routeMap || !routeLayer) return;
+  routeLayer.clearLayers();
+  const cfg = moveCfg($('#routeMovementType').value);
+  if (drawn.length > 1) L.polyline(drawn.map(p => [p.lat, p.lon]), { color: cfg.color, weight: 4, opacity: .9, dashArray: isClosed() ? null : '8 6' }).addTo(routeLayer);
+  pins.forEach((p, i) => {
+    const m = L.marker([p.lat, p.lon], { icon: numIcon(cfg.color, i + 1), draggable: true }).addTo(routeLayer);
+    m.on('dragend', e => { const ll = e.target.getLatLng(); p.lat = ll.lat; p.lon = ll.lng; setTimeout(redrawRoute, 0); });
+    m.on('click', () => openPinModal(i));
+  });
+}
+function pinAtCenter() { if (routeMap) { const c = routeMap.getCenter(); addDrawnPoint(c.lat, c.lng); } }
+async function pinFromGps() {
+  try {
+    toast('GPS wird ermittelt …');
+    const p = await getPosition();
+    addDrawnPoint(p.coords.latitude, p.coords.longitude, 'GPS-Station');
+    if (routeMap) routeMap.setView([p.coords.latitude, p.coords.longitude], Math.max(routeMap.getZoom(), 15));
+    toast('GPS-Nadel hinzugefügt.', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+function connectPins() {
+  if (isClosed()) { toast('Die Strecke ist bereits verbunden.'); return; }
+  if (drawn.length < 3) { toast('Für einen Rundweg sind mindestens 3 Nadeln nötig.', 'err'); return; }
+  drawn.push(drawn[0]);
+  redrawRoute();
+}
+function undoPin() {
+  if (!drawn.length) return;
+  const p = drawn.pop();
+  if (!drawn.includes(p)) dropMedia(p.attachment);     // Schlusspunkt teilt sich das Objekt mit der ersten Nadel
+  redrawRoute();
+}
+function clearPins() { uniquePins().forEach(p => dropMedia(p.attachment)); drawn = []; redrawRoute(); }
+function removePin(i) {
+  const p = uniquePins()[i];
+  if (!p) return;
+  drawn = drawn.filter(x => x !== p);
+  dropMedia(p.attachment);
+  redrawRoute();
+}
+
+function openPinModal(i) {
+  const p = uniquePins()[i];
+  if (!p) return;
+  editingPin = i;
+  $('#pinModalStationTitle').textContent = `Station #${i + 1} bearbeiten`;
+  $('#pinEditTitleInput').value = p.title || '';
+  $('#pinEditDateInput').value = p.date || '';
+  $('#pinEditTimeInput').value = p.time || '';
+  $('#pinEditNoteInput').value = p.note || '';
+  const a = normAtt(p.attachment);
+  drafts.pin = a ? { ...a, _kept: true } : null;          // _kept: schon gespeichert, nicht versehentlich löschen
+  renderDraft('pin');
+  onClose.pinModal = () => clearDraft('pin');
+  openModal('pinModal');
+}
+function savePin() {
+  const p = uniquePins()[editingPin];
+  if (!p) { closeModal('pinModal'); return; }
+  p.title = $('#pinEditTitleInput').value.trim() || p.title;
+  p.date = $('#pinEditDateInput').value;
+  p.time = $('#pinEditTimeInput').value;
+  p.note = $('#pinEditNoteInput').value.trim();
+  const old = p.attachment, d = takeDraft('pin');
+  if (d) delete d._kept;
+  if (old && old.mediaId && (!d || d.mediaId !== old.mediaId)) dropMedia(old);
+  p.attachment = d || null;
+  closeModal('pinModal');
+  redrawRoute();
+  toast('Station gespeichert.', 'ok');
+}
+function deletePinFromModal() { removePin(editingPin); closeModal('pinModal'); }
+
+async function saveRoute() {
+  const pins = uniquePins();
+  if (pins.length < 2) { toast('Bitte mindestens zwei Nadeln setzen.', 'err'); return; }
+  const list = getRoutes();
+  list.push({
+    id: uid(), user: currentUser(), title: $('#drawModalTitle').value.trim() || 'Tour',
+    date: $('#drawModalDate').value || todayISO(), time: $('#drawModalTime').value || '',
+    movementType: $('#routeMovementType').value, distanceKm: routeDistance(),
+    points: drawn.map(p => ({ ...p }))
+  });
+  if (!store.set(K.routes, list)) return;
+  routeSaved = true;
+  closeModal('routeModal');
+  renderTravel();
+  toast('Strecke gespeichert.', 'ok');
+}
+
+
+/* =====================================================================
+   Mitglieder: Anmeldung, Registrierung, Freigabe, Rollen, Passwörter
+   ---------------------------------------------------------------------
+   Alle Konten liegen lokal in diesem Browser (Schlüssel reisen_users).
+   Passwörter werden nur als gesalzener, vielfach wiederholter SHA-256-Hash
+   gespeichert. Das schützt vor dem Mitlesen im Klartext, ersetzt aber keinen
+   Server: Wer die Entwicklerwerkzeuge dieses Browsers öffnet, kann die lokalen
+   Daten ändern.
+   ===================================================================== */
+
+/* ---------- SHA-256 (Konstanten werden berechnet, nicht abgetippt) ---------- */
+const SHA = (() => {
+  const primes = n => { const r = []; for (let c = 2; r.length < n; c++) if (r.every(p => c % p)) r.push(c); return r; };
+  const frac32 = x => Math.floor((x - Math.floor(x)) * 4294967296) >>> 0;
+  return { K: Uint32Array.from(primes(64).map(p => frac32(Math.cbrt(p)))), H: Uint32Array.from(primes(8).map(p => frac32(Math.sqrt(p)))) };
+})();
+function sha256(bytes) {
+  const l = bytes.length, padded = new Uint8Array(((l + 9 + 63) >> 6) << 6);
+  padded.set(bytes); padded[l] = 0x80;
+  const dv = new DataView(padded.buffer);
+  dv.setUint32(padded.length - 8, Math.floor(l * 8 / 4294967296)); dv.setUint32(padded.length - 4, (l * 8) >>> 0);
+  const h = Uint32Array.from(SHA.H), w = new Uint32Array(64), K = SHA.K;
+  const rr = (x, n) => (x >>> n) | (x << (32 - n));
+  for (let off = 0; off < padded.length; off += 64) {
+    for (let i = 0; i < 16; i++) w[i] = dv.getUint32(off + i * 4);
+    for (let i = 16; i < 64; i++) {
+      const s0 = rr(w[i - 15], 7) ^ rr(w[i - 15], 18) ^ (w[i - 15] >>> 3), s1 = rr(w[i - 2], 17) ^ rr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+    }
+    let [a, b, c, d, e, f, g, hh] = h;
+    for (let i = 0; i < 64; i++) {
+      const t1 = (hh + (rr(e, 6) ^ rr(e, 11) ^ rr(e, 25)) + ((e & f) ^ (~e & g)) + K[i] + w[i]) >>> 0;
+      const t2 = ((rr(a, 2) ^ rr(a, 13) ^ rr(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) >>> 0;
+      hh = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+    }
+    h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
+  }
+  const out = new Uint8Array(32), o = new DataView(out.buffer);
+  h.forEach((v, i) => o.setUint32(i * 4, v >>> 0));
+  return out;
+}
+const toHex = u8 => Array.from(u8, b => b.toString(16).padStart(2, '0')).join('');
+const PW_ITER = 12000, PW_MIN = 6;
+function pwHash(pw, salt) {
+  const enc = new TextEncoder(), s = enc.encode(salt);
+  let h = sha256(enc.encode(salt + '\u0000' + pw));
+  const buf = new Uint8Array(32 + s.length); buf.set(s, 32);
+  for (let i = 0; i < PW_ITER; i++) { buf.set(h, 0); h = sha256(buf); }
+  return toHex(h);
+}
+function randomHex(n) {
+  const a = new Uint8Array(n);
+  if (window.crypto && crypto.getRandomValues) crypto.getRandomValues(a); else for (let i = 0; i < n; i++) a[i] = Math.floor(Math.random() * 256);
+  return toHex(a);
+}
+const safeEq = (a, b) => { if (a.length !== b.length) return false; let d = 0; for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i); return d === 0; };
+
+/* ---------- Konten ---------- */
+const cleanName = s => String(s || '').trim().replace(/\s+/g, ' ');
+const nameKey = s => cleanName(s).toLowerCase();
+function makeUser(name, pw, role, status, id) {
+  const salt = randomHex(16);
+  return { id: id || uid(), name: cleanName(name), key: nameKey(name), role, status, salt, hash: pwHash(pw, salt), created: new Date().toISOString() };
+}
+function getUsers() {
+  let u = store.get(K.users, null);
+  if (!Array.isArray(u) || !u.length) { u = [makeUser('admin', 'admin', 'admin', 'active', 'admin')]; store.set(K.users, u); }
+  return u;
+}
+const saveUsers = list => store.set(K.users, list);
+
+/* Angemeldetes Konto (die Sitzung speichert die Konto-ID; „admin“ passt zu alten Daten). */
+function me() {
+  const id = store.str(K.user);
+  if (!id) return null;
+  const u = getUsers().find(x => x.id === id);
+  return u && u.status === 'active' ? u : null;
+}
+const isAdmin = () => { const u = me(); return !!u && u.role === 'admin'; };
+const currentUser = () => (me() || { name: 'admin' }).name;
+/* Eigene Inhalte darf man löschen, Admins alles. Alte Einträge ohne Autor gehören „admin“. */
+function canDelete(item) {
+  const u = me();
+  if (!u) return false;
+  return u.role === 'admin' || nameKey(item && item.user || 'admin') === u.key;
+}
+const memberCount = () => getUsers().filter(u => u.status === 'active').length;
+const authorBadge = item => memberCount() > 1 ? `<span class="badge">${ic('user')} ${esc((item && item.user) || 'admin')}</span>` : '';
+
+/* ---------- Anmelden / Registrieren ---------- */
+const loginFails = {};
+function authLogin(name, pw) {
+  const key = nameKey(name);
+  if (!key || !pw) return { ok: false, msg: 'Bitte Benutzername und Passwort eingeben.' };
+  const f = loginFails[key] || (loginFails[key] = { n: 0, until: 0 });
+  if (f.until > Date.now()) return { ok: false, msg: `Zu viele Fehlversuche. Bitte in ${Math.ceil((f.until - Date.now()) / 1000)} Sekunden erneut versuchen.` };
+  const u = getUsers().find(x => x.key === key);
+  if (!u || !safeEq(pwHash(pw, u.salt), u.hash)) {
+    if (++f.n >= 5) { f.until = Date.now() + 30000; f.n = 0; }
+    return { ok: false, msg: 'Falscher Benutzername oder falsches Passwort.' };
+  }
+  f.n = 0;
+  if (u.status !== 'active') return { ok: false, msg: 'Dein Zugang wartet noch auf die Freigabe durch einen Admin.' };
+  store.setStr(K.user, u.id);
+  return { ok: true, user: u };
+}
+function authRegister(name, pw, pw2) {
+  name = cleanName(name);
+  if (!/^[\p{L}\p{N}][\p{L}\p{N} ._-]{1,22}[\p{L}\p{N}]$/u.test(name)) return { ok: false, msg: 'Der Name braucht 3 bis 24 Zeichen (Buchstaben, Zahlen, Leerzeichen, Punkt, Unter- und Bindestrich).' };
+  const list = getUsers();
+  if (list.some(u => u.key === nameKey(name))) return { ok: false, msg: 'Dieser Name ist schon vergeben oder bereits angefragt.' };
+  if (String(pw).length < PW_MIN) return { ok: false, msg: `Das Passwort braucht mindestens ${PW_MIN} Zeichen.` };
+  if (pw !== pw2) return { ok: false, msg: 'Die beiden Passwörter sind nicht gleich.' };
+  list.push(makeUser(name, pw, 'user', 'pending'));
+  if (!saveUsers(list)) return { ok: false, msg: 'Die Anfrage konnte nicht gespeichert werden.' };
+  return { ok: true, name };
+}
+
+/* ---------- Admin-Aktionen (jede prüft die Berechtigung selbst) ---------- */
+const userById = id => getUsers().find(u => u.id === id);
+function adminOp(fn) {
+  if (!isAdmin()) return { ok: false, msg: 'Das dürfen nur Admins.' };
+  return fn(getUsers());
+}
+function approveUser(id) {
+  return adminOp(list => {
+    const u = list.find(x => x.id === id && x.status === 'pending');
+    if (!u) return { ok: false, msg: 'Anfrage nicht gefunden.' };
+    u.status = 'active'; saveUsers(list);
+    return { ok: true, msg: `${u.name} ist jetzt Mitglied.` };
+  });
+}
+function rejectUser(id) {
+  return adminOp(list => {
+    const u = list.find(x => x.id === id && x.status === 'pending');
+    if (!u) return { ok: false, msg: 'Anfrage nicht gefunden.' };
+    saveUsers(list.filter(x => x !== u));
+    return { ok: true, msg: `Anfrage von ${u.name} abgelehnt.` };
+  });
+}
+function setUserRole(id, role) {
+  return adminOp(list => {
+    const u = list.find(x => x.id === id && x.status === 'active');
+    if (!u || !['admin', 'user'].includes(role)) return { ok: false, msg: 'Mitglied nicht gefunden.' };
+    if (u.id === me().id) return { ok: false, msg: 'Die eigene Rolle lässt sich nicht ändern.' };
+    u.role = role; saveUsers(list);
+    return { ok: true, msg: role === 'admin' ? `${u.name} ist jetzt Admin.` : `${u.name} ist jetzt Standard-Mitglied.` };
+  });
+}
+function removeUser(id) {
+  return adminOp(list => {
+    const u = list.find(x => x.id === id);
+    if (!u) return { ok: false, msg: 'Mitglied nicht gefunden.' };
+    if (u.id === me().id) return { ok: false, msg: 'Du kannst dich nicht selbst entfernen.' };
+    saveUsers(list.filter(x => x !== u));
+    return { ok: true, msg: `${u.name} wurde entfernt.` };
+  });
+}
+function resetUserPassword(id, pw) {
+  return adminOp(list => {
+    const u = list.find(x => x.id === id);
+    if (!u) return { ok: false, msg: 'Mitglied nicht gefunden.' };
+    if (String(pw).length < PW_MIN) return { ok: false, msg: `Das neue Passwort braucht mindestens ${PW_MIN} Zeichen.` };
+    u.salt = randomHex(16); u.hash = pwHash(pw, u.salt); saveUsers(list);
+    return { ok: true, msg: `Neues Passwort für ${u.name} gespeichert.` };
+  });
+}
+function changeOwnPassword(oldPw, newPw, newPw2) {
+  const list = getUsers(), u = me() && list.find(x => x.id === me().id);
+  if (!u) return { ok: false, msg: 'Bitte neu anmelden.' };
+  if (!oldPw || !safeEq(pwHash(oldPw, u.salt), u.hash)) return { ok: false, msg: 'Das alte Passwort stimmt nicht.' };
+  if (newPw !== newPw2) return { ok: false, msg: 'Die beiden neuen Passwörter sind nicht gleich.' };
+  if (String(newPw).length < PW_MIN) return { ok: false, msg: `Das neue Passwort braucht mindestens ${PW_MIN} Zeichen.` };
+  if (newPw === oldPw) return { ok: false, msg: 'Das neue Passwort muss sich vom alten unterscheiden.' };
+  u.salt = randomHex(16); u.hash = pwHash(newPw, u.salt); saveUsers(list);
+  return { ok: true, msg: 'Passwort geändert.' };
+}
+const defaultPwActive = u => !!u && safeEq(pwHash('admin', u.salt), u.hash);
+
+/* ---------- Oberfläche: Anmeldung ---------- */
+function setMsg(id, text, kind = 'err') {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.hidden = !text;
+  el.className = 'form-msg ' + kind;
+  el.textContent = text || '';
+}
+function showAuth(which, keepMsg) {
+  $('#authOverlay').hidden = false;
+  $('#loginForm').hidden = which !== 'login';
+  $('#registerForm').hidden = which !== 'register';
+  if (!keepMsg) { setMsg('loginMsg', ''); setMsg('regMsg', ''); }
+  if (which === 'login') {
+    const first = getUsers().length === 1 && defaultPwActive(getUsers()[0]);
+    $('#loginHint').innerHTML = first
+      ? 'Erster Start: Benutzername <strong>admin</strong>, Passwort <strong>admin</strong>. Bitte ändere das Passwort direkt nach dem Anmelden.'
+      : 'Die Konten und alle Daten bleiben in diesem Browser gespeichert.';
+  }
+  const f = $(which === 'login' ? '#loginUser' : '#regName');
+  if (f && !(window.matchMedia && matchMedia('(pointer:coarse)').matches)) setTimeout(() => f.focus(), 30);
+}
+function doLogin() {
+  const r = authLogin($('#loginUser').value, $('#loginPass').value);
+  if (!r.ok) { setMsg('loginMsg', r.msg); $('#loginPass').value = ''; return; }
+  setMsg('loginMsg', '');
+  $('#loginPass').value = '';
+  startApp();
+}
+function doRegister() {
+  const r = authRegister($('#regName').value, $('#regPass').value, $('#regPass2').value);
+  if (!r.ok) { setMsg('regMsg', r.msg); return; }
+  $('#regPass').value = ''; $('#regPass2').value = '';
+  $('#loginUser').value = r.name; $('#loginPass').value = '';
+  showAuth('login', true);
+  setMsg('loginMsg', `Danke, ${r.name}! Deine Anfrage ist angekommen. Sobald ein Admin sie freigibt, kannst du dich anmelden.`, 'ok');
+  $('#regName').value = '';
+}
+
+/* ---------- Oberfläche: Konto, Mitglieder, Passwörter ---------- */
+function updateNavBadges() {
+  const n = isAdmin() ? getUsers().filter(u => u.status === 'pending').length : 0;
+  $$('[data-view=account] .nav-badge').forEach(b => { b.hidden = !n; b.textContent = String(n); b.setAttribute('aria-label', `${n} offene Anfragen`); });
+}
+const roleBadge = u => u.role === 'admin' ? '<span class="badge ok">Admin</span>' : '<span class="badge">Standard</span>';
+function renderMembers() {
+  const users = getUsers(), mine = me();
+  const pending = users.filter(u => u.status === 'pending');
+  const active = users.filter(u => u.status === 'active').sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name, 'de') : a.role === 'admin' ? -1 : 1));
+  $('#pendingCount').textContent = pending.length ? String(pending.length) : '';
+  $('#pendingCount').hidden = !pending.length;
+  const av = u => `<span class="avatar" aria-hidden="true">${esc(u.name.charAt(0).toUpperCase())}</span>`;
+  $('#pendingList').innerHTML = pending.length ? pending.map(u => `<div class="member-row" data-user="${esc(u.id)}">
+      ${av(u)}<div class="grow"><strong>${esc(u.name)}</strong><div class="muted tiny">Angefragt ${esc(timeAgo(u.created))}</div></div>
+      <button class="btn btn-ok btn-icon" data-act="user-approve" data-id="${esc(u.id)}" aria-label="${esc(u.name)} annehmen" title="Annehmen">${ic('check')}</button>
+      <button class="btn btn-no btn-icon" data-act="user-reject" data-id="${esc(u.id)}" aria-label="${esc(u.name)} ablehnen" title="Ablehnen">${ic('x')}</button>
+    </div>`).join('') : '<p class="muted small">Keine offenen Anfragen.</p>';
+  $('#memberList').innerHTML = active.map(u => {
+    const self = mine && u.id === mine.id;
+    return `<div class="member-row col" data-user="${esc(u.id)}">
+      <div class="row" style="gap:12px">${av(u)}<div class="grow"><div class="row wrap" style="gap:6px"><strong>${esc(u.name)}</strong>${roleBadge(u)}${self ? '<span class="badge">Du</span>' : ''}</div>
+        <div class="muted tiny">Mitglied seit ${esc(fmtDate(String(u.created).slice(0, 10)))}</div></div></div>
+      <div class="member-actions">
+        ${self ? '' : (u.role === 'admin'
+          ? `<button class="btn btn-soft btn-sm" data-act="user-role" data-id="${esc(u.id)}" data-role="user">Zum Standard-Mitglied machen</button>`
+          : `<button class="btn btn-soft btn-sm" data-act="user-role" data-id="${esc(u.id)}" data-role="admin">Zum Admin machen</button>`)}
+        <button class="btn btn-ghost btn-sm" data-act="user-reset" data-id="${esc(u.id)}">${ic('key')}Passwort zurücksetzen</button>
+        ${self ? '' : `<button class="btn btn-ghost btn-sm" data-act="user-remove" data-id="${esc(u.id)}">${ic('trash')}Entfernen</button>`}
+      </div></div>`;
+  }).join('');
+}
+function renderAccountUsers() {
+  const u = me(), admin = isAdmin();
+  $$('.userName').forEach(el => { el.textContent = u ? u.name : ''; });
+  $$('.userRole').forEach(el => { el.textContent = u ? (u.role === 'admin' ? 'Admin' : 'Standard') : ''; });
+  $('#accSince').textContent = u ? fmtDate(String(u.created).slice(0, 10)) : '';
+  $$('[data-admin-only]').forEach(el => { el.hidden = !admin; });
+  $('#pwWarn').hidden = !(u && defaultPwActive(u));
+  if (admin) renderMembers();
+  updateNavBadges();
+}
+const toggleShow = (cb, ids) => ids.forEach(id => { $('#' + id).type = cb.checked ? 'text' : 'password'; });
+function openPwModal() {
+  ['pwOld', 'pwNew', 'pwNew2'].forEach(id => { const el = $('#' + id); el.value = ''; el.type = 'password'; });
+  $('#pwShow').checked = false;
+  setMsg('pwMsg', '');
+  openModal('pwModal');
+}
+function savePw() {
+  const r = changeOwnPassword($('#pwOld').value, $('#pwNew').value, $('#pwNew2').value);
+  if (!r.ok) { setMsg('pwMsg', r.msg); return; }
+  closeModal('pwModal');
+  toast(r.msg, 'ok');
+  renderAccountUsers();
+}
+let resetTarget = null;
+function openResetPw(id) {
+  const u = userById(id);
+  if (!u || !isAdmin()) return;
+  resetTarget = id;
+  $('#resetPwWho').textContent = u.name;
+  $('#resetPwNew').value = ''; $('#resetPwNew').type = 'password'; $('#resetPwShow').checked = false;
+  setMsg('resetPwMsg', '');
+  openModal('resetPwModal');
+}
+function saveResetPw() {
+  const r = resetUserPassword(resetTarget, $('#resetPwNew').value);
+  if (!r.ok) { setMsg('resetPwMsg', r.msg); return; }
+  closeModal('resetPwModal');
+  toast(r.msg, 'ok');
+}
+function afterUserChange(r, okKind = 'ok') {
+  toast(r.msg, r.ok ? okKind : 'err');
+  renderAccountUsers();
+  if (view.current === 'posts') renderPosts();
+}
+async function userRoleAction(id, role) {
+  const u = userById(id);
+  if (!u) return;
+  const ok = await confirmDialog(role === 'admin' ? 'Admin-Rechte vergeben?' : 'Admin-Rechte entziehen?',
+    role === 'admin' ? `${u.name} darf dann Mitglieder verwalten, Daten sichern und alles zurücksetzen.` : `${u.name} ist danach Standard-Mitglied ohne Verwaltungsrechte.`,
+    role === 'admin' ? 'Zum Admin machen' : 'Rechte entziehen');
+  if (ok) afterUserChange(setUserRole(id, role));
+}
+async function userRemoveAction(id) {
+  const u = userById(id);
+  if (!u) return;
+  if (await confirmDialog('Mitglied entfernen?', `${u.name} verliert den Zugang sofort. Beiträge und Einträge bleiben erhalten.`, 'Entfernen')) afterUserChange(removeUser(id));
+}
+
+
+/* =====================================================================
+   Konto: Cloud-Sicherung, Datei-Export/-Import, Zurücksetzen
+   ===================================================================== */
+
+const CLOUD_FILE = 'reiseplaner-backup.json';
+const PROVIDERS = {
+  nextcloud: {
+    label: 'Nextcloud (WebDAV)', endpoint: 'Server-URL (WebDAV-Ordner)', placeholder: 'https://cloud.beispiel.de/remote.php/dav/files/name/Reisen/',
+    token: 'App-Passwort', user: true, endpointField: true,
+    hint: 'Der Ordner muss bereits existieren. Dein Server muss Anfragen von dieser Seite erlauben (CORS), sonst blockiert der Browser die Verbindung.'
+  },
+  onedrive: {
+    label: 'Microsoft OneDrive', endpoint: '', placeholder: '', token: 'Zugriffstoken (Microsoft Graph)', user: false, endpointField: false,
+    hint: 'Benötigt ein gültiges Microsoft-Graph-Zugriffstoken (Dateien.ReadWrite). Solche Tokens laufen meist nach etwa einer Stunde ab.'
+  },
+  googlecloud: {
+    label: 'Google Cloud Storage', endpoint: 'Bucket-Name', placeholder: 'mein-bucket', token: 'OAuth-Zugriffstoken', user: false, endpointField: true,
+    hint: 'Benötigt ein gültiges OAuth-Zugriffstoken mit Schreibrechten auf den Bucket. Solche Tokens laufen meist nach etwa einer Stunde ab.'
+  }
+};
+const getCloud = () => ({ provider: 'nextcloud', endpoint: '', user: '', token: '', ...store.get(K.cloud, {}) });
+
+function updateCloudProviderSetting() {
+  const p = PROVIDERS[$('#cloudProviderSelect').value] || PROVIDERS.nextcloud;
+  $('#currentCloudProviderLabel').textContent = p.label;
+  $('#cloudEndpointLabel').textContent = p.endpoint || 'Server-URL';
+  $('#cloudEndpointInput').placeholder = p.placeholder;
+  $('#cloudEndpointInput').closest('.field').hidden = !p.endpointField;
+  $('#cloudUserField').hidden = !p.user;
+  $('#cloudTokenLabel').textContent = p.token;
+  $('#cloudHint').textContent = p.hint;
+}
+function readCloudForm() {
+  return {
+    provider: $('#cloudProviderSelect').value,
+    endpoint: $('#cloudEndpointInput').value.trim(),
+    user: $('#cloudUserInput').value.trim(),
+    token: $('#cloudTokenInput').value.trim()
+  };
+}
+function saveCloudSettings(silent) {
+  store.set(K.cloud, readCloudForm());
+  if (!silent) toast('Cloud-Einstellungen gespeichert.', 'ok');
+}
+const basicAuth = (u, p) => {
+  const bytes = new TextEncoder().encode(`${u}:${p}`);
+  let s = ''; bytes.forEach(b => { s += String.fromCharCode(b); });
+  return 'Basic ' + btoa(s);
+};
+function cloudRequest(c, dir) {
+  if (!c.token) throw new Error('Bitte Token bzw. Passwort eintragen.');
+  const up = dir === 'up';
+  if (c.provider === 'nextcloud') {
+    const base = safeUrl(c.endpoint);
+    if (!base) throw new Error('Bitte eine gültige Server-URL eintragen.');
+    if (!c.user) throw new Error('Bitte den Benutzernamen eintragen.');
+    return { url: base.replace(/\/?$/, '/') + CLOUD_FILE, method: up ? 'PUT' : 'GET', headers: { Authorization: basicAuth(c.user, c.token) } };
+  }
+  const bearer = { Authorization: 'Bearer ' + c.token };
+  if (c.provider === 'onedrive') return { url: `https://graph.microsoft.com/v1.0/me/drive/root:/${CLOUD_FILE}:/content`, method: up ? 'PUT' : 'GET', headers: bearer };
+  if (c.provider === 'googlecloud') {
+    if (!c.endpoint) throw new Error('Bitte den Bucket-Namen eintragen.');
+    const b = encodeURIComponent(c.endpoint);
+    return up
+      ? { url: `https://storage.googleapis.com/upload/storage/v1/b/${b}/o?uploadType=media&name=${CLOUD_FILE}`, method: 'POST', headers: bearer }
+      : { url: `https://storage.googleapis.com/storage/v1/b/${b}/o/${CLOUD_FILE}?alt=media`, method: 'GET', headers: bearer };
+  }
+  throw new Error('Unbekannter Anbieter.');
+}
+async function cloudSync(dir) {
+  const c = readCloudForm();
+  store.set(K.cloud, c);
+  let req;
+  try { req = cloudRequest(c, dir); } catch (e) { toast(e.message, 'err'); return; }
+  const btns = $$('[data-act=cloud-up],[data-act=cloud-down]');
+  btns.forEach(b => { b.disabled = true; });
+  try {
+    if (dir === 'up') {
+      toast('Sicherung wird hochgeladen …');
+      const body = JSON.stringify(await collectData({ withVideos: false }));
+      const r = await fetch(req.url, { method: req.method, headers: { ...req.headers, 'Content-Type': 'application/json' }, body });
+      if (!r.ok) throw httpError(r.status);
+      toast('Sicherung hochgeladen.', 'ok');
+    } else {
+      toast('Sicherung wird geladen …');
+      const r = await fetch(req.url, { method: 'GET', headers: req.headers });
+      if (!r.ok) throw httpError(r.status);
+      const data = await r.json();
+      const n = await importData(data);
+      toast(`Wiederhergestellt: ${n.posts} Beiträge, ${n.entries} Einträge, ${n.routes} Strecken.`, 'ok');
+    }
+  } catch (e) {
+    toast(e instanceof TypeError ? 'Verbindung fehlgeschlagen: Server nicht erreichbar oder durch CORS blockiert.' : (e.message || 'Cloud-Zugriff fehlgeschlagen.'), 'err');
+  } finally { btns.forEach(b => { b.disabled = false; }); }
+}
+function httpError(s) {
+  const m = { 401: 'Anmeldung abgelehnt (401) – Zugangsdaten prüfen.', 403: 'Zugriff verweigert (403).', 404: 'Nicht gefunden (404) – Ordner bzw. Sicherung existiert nicht.', 409: 'Zielordner existiert nicht (409).' };
+  return new Error(m[s] || `Server-Antwort: HTTP ${s}`);
+}
+
+/* ---------- Export / Import ---------- */
+function referencedMedia(posts = getPosts(), entries = getEntries(), routes = getRoutes()) {
+  const ids = new Set();
+  const add = a => { if (a && a.mediaId) ids.add(a.mediaId); };
+  posts.forEach(p => { add(p.attachment); (p.replies || []).forEach(r => add(r.attachment)); });
+  entries.forEach(e => add(e.attachment));
+  routes.forEach(r => (r.points || []).forEach(p => add(p.attachment)));
+  return ids;
+}
+async function collectData({ withVideos = true } = {}) {
+  const data = { app: 'reiseplaner', version: 2, exportedAt: new Date().toISOString(), posts: getPosts(), entries: getEntries(), routes: getRoutes(), users: getUsers(), media: {} };
+  for (const id of referencedMedia(data.posts, data.entries, data.routes)) {
+    try {
+      const blob = await idb.get(id);
+      if (!blob) continue;
+      if (!withVideos && String(blob.type).startsWith('video')) continue;
+      data.media[id] = { type: blob.type, data: await fileToDataUrl(blob) };
+    } catch { /* Medium überspringen */ }
+  }
+  return data;
+}
+function dataUrlToBlob(u) {
+  const [head, b64] = u.split(',');
+  const type = (/data:([^;]+)/.exec(head) || [])[1] || 'application/octet-stream';
+  const bin = atob(b64), arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type });
+}
+/* Führt importierte Daten mit den vorhandenen zusammen (gleiche ID = importierte Version gewinnt). */
+async function importData(data) {
+  if (!isAdmin()) throw new Error('Das dürfen nur Admins.');
+  if (!data || typeof data !== 'object' || (data.app && data.app !== 'reiseplaner') || !(Array.isArray(data.posts) || Array.isArray(data.entries) || Array.isArray(data.routes))) {
+    throw new Error('Diese Datei ist keine gültige Reiseplaner-Sicherung.');
+  }
+  const merge = (cur, inc) => {
+    const map = new Map(cur.map(x => [String(x.id), x]));
+    (inc || []).forEach(x => { if (x && x.id != null) map.set(String(x.id), x); });
+    return [...map.values()];
+  };
+  const posts = merge(getPosts(), data.posts), entries = merge(getEntries(), data.entries), routes = merge(getRoutes(), data.routes);
+  for (const [id, m] of Object.entries(data.media || {})) {
+    try { if (!(await idb.get(id))) await idb.put(id, dataUrlToBlob(m.data)); } catch { /* weiter */ }
+  }
+  if (Array.isArray(data.users) && data.users.length) {
+    // Mitglieder aus der Sicherung nur ergänzen – bestehende Konten (und ihre Passwörter) bleiben unangetastet.
+    const cur = getUsers(), ids = new Set(cur.map(u => u.id)), keys = new Set(cur.map(u => u.key));
+    const add = data.users.filter(u => u && u.id && u.name && u.salt && u.hash && !ids.has(u.id) && !keys.has(nameKey(u.name)))
+      .map(u => ({ id: String(u.id), name: cleanName(u.name), key: nameKey(u.name), role: u.role === 'admin' ? 'admin' : 'user', status: u.status === 'pending' ? 'pending' : 'active', salt: String(u.salt), hash: String(u.hash), created: u.created || new Date().toISOString() }));
+    if (add.length) saveUsers(cur.concat(add));
+  }
+  if (!(store.set(K.posts, posts) && store.set(K.entries, entries) && store.set(K.routes, routes))) throw new Error('Speicher voll.');
+  renderPosts();
+  if (view.current === 'travel') renderTravel();
+  renderAccount();
+  return { posts: (data.posts || []).length, entries: (data.entries || []).length, routes: (data.routes || []).length };
+}
+async function exportFile() {
+  try {
+    toast('Export wird erstellt …');
+    const json = JSON.stringify(await collectData({ withVideos: true }));
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+    a.download = `reiseplaner-${todayISO()}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    toast('Export gespeichert.', 'ok');
+  } catch (e) { toast('Export fehlgeschlagen: ' + (e.message || ''), 'err'); }
+}
+async function importFile(input) {
+  const f = input.files && input.files[0];
+  input.value = '';
+  if (!f) return;
+  try {
+    const n = await importData(JSON.parse(await f.text()));
+    toast(`Importiert: ${n.posts} Beiträge, ${n.entries} Einträge, ${n.routes} Strecken.`, 'ok');
+  } catch (e) { toast(e instanceof SyntaxError ? 'Die Datei ist kein gültiges JSON.' : e.message, 'err'); }
+}
+
+/* ---------- Konto-Ansicht ---------- */
+function renderAccount() {
+  renderAccountUsers();
+  if (!isAdmin()) { setTheme(document.documentElement.getAttribute('data-theme') || 'auto'); $('#dataSummary').textContent = `${getPosts().length} Beiträge · ${getEntries().length} Einträge · ${getRoutes().length} Strecken`; return; }
+  const c = getCloud();
+  $('#cloudProviderSelect').value = PROVIDERS[c.provider] ? c.provider : 'nextcloud';
+  $('#cloudEndpointInput').value = c.endpoint || '';
+  $('#cloudUserInput').value = c.user || '';
+  $('#cloudTokenInput').value = c.token || '';
+  updateCloudProviderSetting();
+  $('#dataSummary').textContent = `${getPosts().length} Beiträge · ${getEntries().length} Einträge · ${getRoutes().length} Strecken`;
+  setTheme(document.documentElement.getAttribute('data-theme') || 'auto');
+}
+function logout() {
+  store.remove(K.user);
+  [...openModals].forEach(closeModal);
+  Object.keys(drafts).forEach(k => clearDraft(k));
+  $('#app').hidden = true;
+  $('#loginUser').value = ''; $('#loginPass').value = '';
+  showAuth('login');
+  window.scrollTo(0, 0);
+}
+async function resetAll() {
+  if (!isAdmin()) { toast('Das dürfen nur Admins.', 'err'); return; }
+  if (!await confirmDialog('Alle Daten zurücksetzen?', 'Beiträge, Tagebuch, Strecken, Bilder, Videos und Cloud-Einstellungen werden unwiderruflich von diesem Gerät gelöscht. Mitglieder bleiben erhalten. Tipp: vorher exportieren.', 'Alles löschen')) return;
+  [K.cloud, K.entries, K.routes, K.posts, K.last, K.cats].forEach(k => store.remove(k));
+  try { await idb.clear(); } catch { /* egal */ }
+  location.reload();
+}
+/* Medien aufräumen, die von keinem Datensatz mehr verwendet werden (z. B. nach abgebrochenen Formularen). */
+async function purgeOrphanMedia() {
+  try {
+    const used = referencedMedia();
+    Object.values(drafts).forEach(d => { if (d && d.mediaId) used.add(d.mediaId); });   // laufende Entwürfe nicht anfassen
+    for (const k of await idb.keys()) if (!used.has(k)) await idb.del(k);
+  } catch { /* egal */ }
+}
+
+/* ---------- Verbindungstest ---------- */
+function netError(e) {
+  if (e && e.name === 'AbortError') return 'Keine Antwort (Zeitüberschreitung)';
+  if (e instanceof TypeError) return 'Blockiert oder offline';
+  return (e && e.message) || 'Nicht erreichbar';
+}
+function probeImage(url, timeout = 9000) {
+  return new Promise((res, rej) => {
+    const img = new Image(), t = setTimeout(() => { img.src = ''; rej(new Error('Keine Antwort (Zeitüberschreitung)')); }, timeout);
+    img.onload = () => { clearTimeout(t); res(); };
+    img.onerror = () => { clearTimeout(t); rej(new Error('Blockiert oder offline')); };
+    img.src = url;
+  });
+}
+async function runDiagnostics() {
+  const box = $('#diagResult'), btn = $('#diagBtn'), rows = [];
+  box.hidden = false; btn.disabled = true;
+  const draw = () => {
+    box.innerHTML = rows.map(r => `<div class="diag-row ${r.state}"><span class="d-ic" aria-hidden="true">${r.state === 'ok' ? '✓' : r.state === 'bad' ? '✕' : r.state === 'warn' ? '!' : '…'}</span><div class="grow"><strong>${esc(r.name)}</strong><div class="muted tiny">${esc(r.detail || '')}</div></div><span class="muted tiny num">${r.ms != null ? r.ms + ' ms' : ''}</span></div>`).join('') + (rows.summary ? `<p class="small" style="margin-top:10px">${esc(rows.summary)}</p>` : '');
+  };
+  const run = async (name, fn) => {
+    const r = { name, state: 'wait', detail: 'Prüfung läuft …' };
+    rows.push(r); draw();
+    const t = performance.now();
+    try { const v = await fn(); r.state = (v && v.warn) ? 'warn' : 'ok'; r.detail = (v && v.text) || v || 'Erreichbar'; }
+    catch (e) { r.state = 'bad'; r.detail = netError(e); }
+    r.ms = Math.round(performance.now() - t);
+    draw();
+  };
+  const tests = [
+    ['Speicher im Browser', async () => store.persistent ? 'Dauerhaft (localStorage)' : { warn: true, text: 'Nur im Arbeitsspeicher – Daten gehen beim Schließen verloren. Datei direkt im Browser öffnen.' }],
+    ['Medien-Speicher (Bilder, Videos)', async () => { await idb.keys(); return 'IndexedDB verfügbar'; }],
+    ['Kartenkacheln (Esri Karte)', async () => { await probeImage(BASES['Karte'].tileUrl(0, 0, 0)); return 'Kacheln laden'; }],
+    ['Kartenkacheln (Esri Satellit)', async () => { await probeImage(BASES['Satellit'].tileUrl(0, 0, 0)); return 'Kacheln laden'; }],
+    ['Kartenkacheln (OpenStreetMap)', async () => { await probeImage(BASES['OpenStreetMap'].tileUrl(0, 0, 0)); return 'Kacheln laden'; }],
+    ['Ortssuche (Photon)', async () => { const d = await fetchJson(`${PHOTON}/api/?q=Berlin&limit=1&lang=de`, {}, 9000); const f = d.features && d.features[0]; if (!f) throw new Error('Keine Treffer'); return 'Treffer: ' + (f.properties.name || '?'); }],
+    ['Ortssuche (Nominatim)', async () => { const d = await fetchJson(`${NOMINATIM}/search?format=jsonv2&limit=1&q=Berlin`, {}, 9000); if (!d.length) throw new Error('Keine Treffer'); return 'Treffer: ' + String(d[0].display_name).split(',')[0]; }],
+    ...OVERPASS.map(u => ['Orte-Server ' + new URL(u).host, async () => {
+      const d = await fetchJson(u, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'data=' + encodeURIComponent('[out:json][timeout:10];node(1);out;') }, 12000);
+      return Array.isArray(d.elements) ? 'Antwortet' : { warn: true, text: 'Antwort ohne Daten' };
+    }]),
+    ['Wetter (Open-Meteo)', async () => { const d = await fetchJson('https://api.open-meteo.com/v1/forecast?latitude=52.5&longitude=13.4&current=temperature_2m', {}, 9000); return `Berlin: ${d.current.temperature_2m} °C`; }],
+    ['Wikipedia', async () => { const d = await fetchJson('https://de.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=52.52%7C13.405&gsradius=1000&gslimit=1&format=json&origin=*', {}, 9000); return 'Antwortet (' + ((d.query && d.query.geosearch) || []).length + ' Treffer)'; }],
+    ['Standort (GPS)', async () => {
+      if (!('geolocation' in navigator)) throw new Error('Wird nicht unterstützt');
+      let st = 'unbekannt';
+      try { st = (await navigator.permissions.query({ name: 'geolocation' })).state; } catch { /* egal */ }
+      return st === 'denied' ? { warn: true, text: 'Zugriff verweigert – im Browser erlauben' } : { text: 'Verfügbar (Berechtigung: ' + ({ granted: 'erteilt', prompt: 'wird abgefragt', denied: 'verweigert' }[st] || st) + ')' };
+    }]
+  ];
+  await Promise.all(tests.map(([n, f]) => run(n, f)));
+  const bad = rows.filter(r => r.state === 'bad').length;
+  rows.summary = bad ? `${bad} von ${rows.length} Prüfungen sind fehlgeschlagen. Wird fast alles blockiert, läuft die Datei vermutlich in einer eingeschränkten Vorschau. Lade sie herunter und öffne sie direkt im Browser.` : 'Alles erreichbar.';
+  draw();
+  btn.disabled = false;
+}
+
+/* =====================================================================
+   Start, Anmeldung, Ereignisse
+   ===================================================================== */
+function startApp() {
+  if (!me()) { showAuth('login'); return; }
+  if (!store.persistent) toast('Hinweis: In dieser Vorschau ist kein dauerhafter Speicher möglich – Einträge bleiben nur, bis du sie schließt. Öffne die Datei direkt im Browser, damit alles gespeichert wird.', 'err');
+  $('#authOverlay').hidden = true;
+  $('#app').hidden = false;
+  renderAccountUsers();
+  mountToolbars();
+  const last = store.get(K.last, null);
+  if (last && isFinite(last.lat) && isFinite(last.lon)) { loc.lat = last.lat; loc.lon = last.lon; loc.name = last.name || null; }
+  $('#radiusRange').value = String(loc.radius);
+  $('#radiusValue').textContent = String(loc.radius);
+  $('#locTitle').textContent = loc.name || 'Gewählter Punkt';
+  $('#locSub').textContent = `${loc.lat.toFixed(4)}, ${loc.lon.toFixed(4)}`;
+  showView('map');
+  initMainMap();
+  setLocation(loc.lat, loc.lon, loc.name, { zoom: false });
+  renderPosts();
+  purgeOrphanMedia();
+  const lb = $('#startLastBtn');
+  lb.hidden = !(last && last.name);
+  if (!lb.hidden) lb.textContent = `Weiter bei: ${last.name}`;
+  openModal('startModal');
+  const pend = isAdmin() ? getUsers().filter(u => u.status === 'pending').length : 0;
+  if (pend) toast(pend === 1 ? '1 neue Mitgliedsanfrage wartet auf deine Freigabe (Konto).' : `${pend} neue Mitgliedsanfragen warten auf deine Freigabe (Konto).`, 'ok');
+}
+
+/* Aktionen, die nur Admins ausführen dürfen (zusätzlich zum Ausblenden in der Oberfläche). */
+const ADMIN_ACTIONS = new Set(['cloud-save', 'cloud-up', 'cloud-down', 'export', 'reset', 'diag-run', 'user-approve', 'user-reject', 'user-role', 'user-reset', 'user-remove']);
+const ACTIONS = {
+  'locate': () => useGps(),
+  'navigate': () => openNavigation(),
+  'poi-list': () => openPoiList(),
+  'poi-cat': el => togglePoiCat(el.dataset.cat),
+  'poi-all': el => setAllPoiCats(el.dataset.on === '1'),
+  'poi-retry': () => loadPois(true),
+  'poi-tab': el => { poiState.tab = el.dataset.tab; renderPoiList(); },
+  'poi-focus': el => focusPoi(el.dataset.id),
+  'poi-nav': el => openNavigation(+el.dataset.lat, +el.dataset.lon),
+
+  'att-gif': el => openGifPicker(el.dataset.target),
+  'att-place': el => openPlacePicker(el.dataset.target),
+  'att-yt': el => openLinkPicker(el.dataset.target, 'yt'),
+  'att-reddit': el => openLinkPicker(el.dataset.target, 'reddit'),
+  'att-poll': el => openPollPicker(el.dataset.target),
+  'draft-clear': el => clearDraft(el.dataset.target),
+  'gif-pick': el => pickGif(el.dataset.url),
+  'place-gps': () => confirmPlaceGps(),
+  'emoji': el => openEmoji(el.dataset.target),
+  'emoji-pick': el => insertEmoji(el.dataset.emoji),
+
+  'post-save': () => savePost(),
+  'post-del': el => deletePost(el.dataset.post),
+  'reply-open': el => openReply(el.dataset.post),
+  'reply-save': () => saveReply(),
+  'reply-del': el => deleteReply(el.dataset.post, el.dataset.reply),
+  'vote': el => votePoll(el.dataset.post, el.dataset.reply, +el.dataset.idx),
+
+  'year': el => { travelUi.year = el.dataset.year; renderTravel(); },
+  'move': el => { travelUi.move[el.dataset.move] = travelUi.move[el.dataset.move] === false; renderTravel(); },
+  'entry-new': () => openEntryModal(),
+  'entry-gps': () => entryUseGps(),
+  'entry-save': () => saveEntry(),
+  'entry-del': el => deleteEntry(el.dataset.id),
+  'entry-focus': el => { const e = getEntries().find(x => String(x.id) === el.dataset.id); if (e && e.lat != null) focusOnTravelMap([[e.lat, e.lon]]); },
+  'route-new': () => openRouteModal(),
+  'route-save': () => saveRoute(),
+  'route-del': el => deleteRoute(el.dataset.id),
+  'route-focus': el => { const r = getRoutes().find(x => String(x.id) === el.dataset.id); if (r) focusOnTravelMap((r.points || []).map(p => [p.lat, p.lon])); },
+  'pin-center': () => pinAtCenter(),
+  'pin-gps': () => pinFromGps(),
+  'pin-close': () => connectPins(),
+  'pin-undo': () => undoPin(),
+  'pin-clear': () => clearPins(),
+  'pin-edit': el => openPinModal(+el.dataset.idx),
+  'pin-remove': el => removePin(+el.dataset.idx),
+  'pin-save': () => savePin(),
+  'pin-delete': () => deletePinFromModal(),
+
+  'start-gps': () => useGps(() => closeModal('startModal')),
+  'start-last': () => closeModal('startModal'),
+  'confirm-yes': () => answerConfirm(true),
+  'confirm-no': () => answerConfirm(false),
+
+  'cloud-save': () => saveCloudSettings(),
+  'cloud-up': () => cloudSync('up'),
+  'cloud-down': () => cloudSync('down'),
+  'export': () => exportFile(),
+  'logout': () => logout(),
+  'auth-register': () => showAuth('register'),
+  'auth-login': () => showAuth('login'),
+  'pw-open': () => openPwModal(),
+  'user-approve': el => afterUserChange(approveUser(el.dataset.id)),
+  'user-reject': el => afterUserChange(rejectUser(el.dataset.id), ''),
+  'user-role': el => userRoleAction(el.dataset.id, el.dataset.role),
+  'user-reset': el => openResetPw(el.dataset.id),
+  'user-remove': el => userRemoveAction(el.dataset.id),
+  'diag-run': () => runDiagnostics(),
+  'reset': () => resetAll()
+};
+
+function bindEvents() {
+  document.addEventListener('click', e => {
+    if (e.target.classList && e.target.classList.contains('modal')) { closeModal(e.target.id); return; }
+    const close = e.target.closest('[data-close]');
+    if (close) { closeModal(close.dataset.close); return; }
+    const nav = e.target.closest('[data-view]');
+    if (nav) { showView(nav.dataset.view); return; }
+    const th = e.target.closest('[data-theme-set]');
+    if (th) { setTheme(th.dataset.themeSet); return; }
+    const el = e.target.closest('[data-act]');
+    if (!el) return;
+    const fn = ACTIONS[el.dataset.act];
+    if (!fn) return;
+    e.preventDefault();
+    if (ADMIN_ACTIONS.has(el.dataset.act) && !isAdmin()) { toast('Das dürfen nur Admins.', 'err'); return; }
+    fn(el);
+  });
+  document.addEventListener('change', e => {
+    const f = e.target.closest && e.target.closest('[data-file]');
+    if (f) handleFileUpload(f);
+  });
+
+  /* Formulare nicht auf das native „submit“ verlassen: In eingebetteten Vorschauen
+     (iframe ohne „allow-forms“) blockiert der Browser das Absenden komplett, das
+     submit-Ereignis feuert dann nie. Darum Klick auf den Absende-Knopf und Enter
+     selbst abfangen; das submit-Ereignis bleibt als zusätzliche Absicherung. */
+  const formHandlers = {};
+  const onSubmit = (id, fn) => {
+    formHandlers[id] = fn;
+    $('#' + id).addEventListener('submit', e => { e.preventDefault(); fn(); });
+  };
+  document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('button[type=submit], input[type=submit]');
+    const form = b && b.form;
+    if (!form || !formHandlers[form.id]) return;
+    e.preventDefault();
+    formHandlers[form.id]();
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' || e.isComposing || e.shiftKey || e.defaultPrevented) return;
+    const t = e.target;
+    if (!t || t.tagName !== 'INPUT' || /^(button|submit|checkbox|radio|file|range|reset)$/i.test(t.type)) return;
+    const form = t.form;
+    if (!form || !formHandlers[form.id]) return;
+    e.preventDefault();
+    formHandlers[form.id]();
+  });
+  onSubmit('loginForm', doLogin);
+  onSubmit('registerForm', doRegister);
+  onSubmit('pwForm', savePw);
+  onSubmit('resetPwForm', saveResetPw);
+  $('#pwShow').addEventListener('change', e => toggleShow(e.target, ['pwOld', 'pwNew', 'pwNew2']));
+  $('#resetPwShow').addEventListener('change', e => toggleShow(e.target, ['resetPwNew']));
+  const pickMain = it => { setLocation(it.lat, it.lon, it.name); toast('📍 ' + it.name, 'ok'); };
+  const sMain = makeSuggest({ input: $('#searchInput'), list: $('#searchSuggest'), onPick: (it, q) => { if ($('#searchInput').value.trim() === q) $('#searchInput').value = ''; pickMain(it); } });
+  const sStart = makeSuggest({ input: $('#startAddrInput'), list: $('#startSuggest'), onPick: it => { closeModal('startModal'); pickMain(it); } });
+  onSubmit('searchForm', () => sMain.submit());
+  onSubmit('startForm', () => sStart.submit());
+  onSubmit('gifUrlForm', () => pickGif($('#gifUrlInput').value));
+  const sPlace = makeSuggest({ input: $('#placeAddrInput'), list: $('#placeSuggest'), onPick: confirmPlace });
+  onSubmit('placeForm', () => sPlace.submit());
+  onSubmit('linkForm', () => confirmLinkAttachment());
+  onSubmit('pollForm', () => confirmPollAttachment());
+  const sRoute = makeSuggest({ input: $('#routeSearchInput'), list: $('#routeSuggest'), onPick: it => { if (routeMap) routeMap.setView([it.lat, it.lon], 15); } });
+  onSubmit('routeSearchForm', () => sRoute.submit());
+  makeSuggest({ input: $('#entryAddress'), list: $('#entrySuggest'), onPick: pickEntryPlace });
+
+  $('#radiusRange').addEventListener('input', e => onRadiusInput(e.target.value));
+  $('#poiSearchInput').addEventListener('input', renderPoiList);
+  $('#cloudProviderSelect').addEventListener('change', updateCloudProviderSetting);
+  $('#routeMovementType').addEventListener('change', redrawRoute);
+  $('#importFile').addEventListener('change', e => importFile(e.target));
+  $('#entryAddress').addEventListener('input', () => { $('#entryGeoState').textContent = ''; entryGeo.lat = null; });
+  $('#entryAddress').addEventListener('change', () => { if (!$('#entrySuggest').hidden) return; resolveEntryAddress(true); });
+}
+
+function init() {
+  setTheme(store.str(K.theme) || 'auto');
+  bindEvents();
+  getUsers();                                     // legt beim ersten Start das Admin-Konto an
+  if (me()) startApp(); else { store.remove(K.user); showAuth('login'); }
+  window.addEventListener('storage', e => {       // Änderungen in einem anderen Tab desselben Browsers
+    if (e.key !== K.users && e.key !== K.user) return;
+    if (!$('#app').hidden && !me()) { toast('Dein Zugang wurde geändert. Bitte neu anmelden.', 'err'); logout(); return; }
+    if (view.current === 'account') renderAccountUsers();
+    updateNavBadges();
+  });
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+else init();
+
+</script>
+</body>
+</html>
