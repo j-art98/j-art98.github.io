@@ -1,1376 +1,1585 @@
-<!DOCTYPE html> 
-<html lang="de"> 
-<head> 
-    <meta charset="UTF-8"> 
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"> 
-    <title>Reisen 🌍✈️</title> 
-    <meta name="theme-color" content="#0f172a"> 
-    <meta name="mobile-web-app-capable" content="yes"> 
-    <meta name="apple-mobile-web-app-capable" content="yes"> 
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"> 
-    <link rel="manifest" id="manifestPlaceholder"> 
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" /> 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script> 
-<style> 
-:root { 
-    --bg-color: #0f172a; 
-    --card-bg: #1e293b; 
-    --text-color: #f8fafc; 
-    --text-muted: #94a3b8; 
-    --accent-color: #3b82f6; 
-    --accent-hover: #2563eb; 
-    --border-color: #334155; 
-    --bottom-nav-height: 64px; 
-} 
-* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; } 
-body { 
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
-    background-color: var(--bg-color); color: var(--text-color); 
-    margin: 0; padding: 0 0 calc(var(--bottom-nav-height) + 12px) 0; 
-    width: 100vw; min-height: 100vh; overflow-x: hidden; 
-} 
-@keyframes swivelSpin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } } 
-.swivel-loader { 
-    display: inline-block; width: 28px; height: 28px; border: 3px solid var(--border-color); 
-    border-top-color: var(--accent-color); border-radius: 50%; animation: swivelSpin 0.8s linear infinite; vertical-align: middle; 
-} 
-.map-loading-overlay { 
-    position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
-    background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(4px); z-index: 1000; 
-    display: flex; justify-content: center; align-items: center; flex-direction: column; gap: 10px; 
-    border-radius: 12px; color: white; font-weight: 600; 
-} 
-#toastContainer { 
-    position: fixed; top: 20px; left: 50%; transform: translateX(-50%); 
-    z-index: 10000; display: flex; flex-direction: column; gap: 8px; width: 90%; max-width: 380px; pointer-events: none; 
-} 
-.toast { 
-    background: rgba(30, 41, 59, 0.95); color: var(--text-color); border: 1px solid var(--accent-color); 
-    padding: 12px 16px; border-radius: 10px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); 
-    backdrop-filter: blur(8px); font-size: 0.9rem; text-align: center; animation: slideDown 0.3s ease-out; pointer-events: auto; 
-} 
-@keyframes slideDown { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } } 
-#authOverlay { 
-    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; 
-    background: rgba(15, 23, 42, 0.98); z-index: 9999; display: flex; justify-content: center; align-items: center; padding: 16px; 
-} 
-.auth-box { 
-    background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; 
-    padding: 24px; width: 100%; max-width: 420px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.6); position: relative; 
-} 
-.auth-box h2 { margin-top: 0; color: var(--accent-color); text-align: center; font-size: 1.5rem; margin-bottom: 20px; } 
-.auth-form-group { margin-bottom: 14px; } 
-.auth-form-group label { display: block; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 6px; } 
-.container { width: 100%; max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; padding: 10px; } 
-.app-header-card { background: var(--card-bg); padding: 14px 16px; border-radius: 14px; border: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 10px; } 
-.app-header-top { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; } 
-h1 { font-size: 1.3rem; margin: 0; color: var(--text-color); display: flex; align-items: center; gap: 8px; cursor: pointer; } 
-.badge { background: #334155; padding: 6px 12px; border-radius: 8px; font-size: 0.85rem; cursor: pointer; } 
-.logout-btn { background: #ef4444; color: white; padding: 8px 14px; font-size: 0.8rem; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; } 
-.card { background: var(--card-bg); border-radius: 14px; padding: 14px; border: 1px solid var(--border-color); box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2); width: 100%; } 
-.card h3 { margin-top: 0; font-size: 1.1rem; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 10px; } 
-.map-container { height: 340px; width: 100%; border-radius: 12px; margin-top: 10px; z-index: 1; position: relative; } 
-.interactive-legend-card { margin-top: 12px; background: #0f172a; border: 1px solid var(--border-color); border-radius: 10px; padding: 12px; } 
-.interactive-legend-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-top: 8px; } 
-.legend-item-box { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 10px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; } 
-.legend-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-right: 6px; } 
-.legend-dot.gray { background: #64748b; } .legend-dot.pink { background: #ec4899; } .legend-dot.green { background: #10b981; } .legend-dot.teal { background: #14b8a6; } .legend-dot.blue { background: #3b82f6; } .legend-dot.purple { background: #8b5cf6; } .legend-dot.red { background: #ef4444; } .legend-dot.orange { background: #f59e0b; } .legend-dot.emerald { background: #059669; } 
-.search-box { display: flex; gap: 8px; margin-bottom: 10px; } 
-.radius-control { display: flex; align-items: center; gap: 12px; background: #0f172a; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border-color); font-size: 0.9rem; margin-bottom: 10px; } 
-.radius-control input[type="range"] { flex-grow: 1; height: 6px; accent-color: var(--accent-color); } 
-input[type="text"], input[type="password"], input[type="date"], input[type="time"], textarea, select { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); background: #0f172a; color: white; font-size: 0.95rem; outline: none; } 
-input:focus, textarea:focus, select:focus { border-color: var(--accent-color); } 
-button { background: var(--accent-color); color: white; border: none; padding: 12px 18px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.95rem; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; } 
-button:active { opacity: 0.8; } 
-.unified-media-toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; margin-bottom: 8px; } 
-.media-btn { background: #334155; color: white; padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; min-height: 36px; } 
-.media-btn-img { background: var(--accent-color); } .media-btn-vid { background: #10b981; } .media-btn-gif { background: #8b5cf6; } .media-btn-loc { background: #059669; } .media-btn-yt { background: #ef4444; } .media-btn-poll{ background: #f59e0b; } .media-btn-reddit { background: #ff4500; } 
-.weather-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 8px; margin-top: 10px; } 
-.weather-day { background: #0f172a; padding: 10px 6px; border-radius: 10px; border: 1px solid var(--border-color); font-size: 0.8rem; text-align: center; } 
-.weather-hours { display: flex; overflow-x: auto; gap: 8px; padding-bottom: 6px; margin-top: 10px; } 
-.hour-slot { background: #0f172a; min-width: 65px; padding: 8px; border-radius: 8px; text-align: center; font-size: 0.8rem; border: 1px solid var(--border-color); flex-shrink: 0; } 
-.modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); justify-content: center; align-items: center; z-index: 2000; padding: 16px; backdrop-filter: blur(4px); } 
-.modal-content { background: var(--card-bg); padding: 20px; border-radius: 16px; max-width: 800px; width: 100%; border: 1px solid var(--border-color); max-height: 90vh; overflow-y: auto; position: relative; } 
-.close-modal { cursor: pointer; font-size: 1.4rem; font-weight: bold; color: var(--text-muted); background: #334155; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; position: absolute; top: 14px; right: 14px; z-index: 10; } 
-.bottom-nav { position: fixed; bottom: 0; left: 0; width: 100vw; height: var(--bottom-nav-height); background: #090d16; border-top: 1px solid var(--border-color); display: flex; justify-content: space-around; align-items: center; z-index: 5000; padding-bottom: env(safe-area-inset-bottom); } 
-.nav-item { display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-muted); font-size: 0.72rem; gap: 4px; flex: 1; height: 100%; cursor: pointer; } 
-.nav-item.active { color: var(--accent-color); font-weight: 600; } 
-.nav-item-icon { font-size: 1.4rem; } 
-.reaction-badge { display: inline-flex; align-items: center; gap: 4px; background: #0f172a; border: 1px solid var(--border-color); padding: 4px 8px; border-radius: 12px; font-size: 0.8rem; cursor: pointer; } 
-.poi-list-item { background: #0f172a; border: 1px solid var(--border-color); border-radius: 10px; padding: 12px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 6px; cursor: pointer; transition: border-color 0.2s; } 
-.category-tab-bar { display: flex; overflow-x: auto; gap: 6px; padding-bottom: 8px; margin-bottom: 10px; } 
-.cat-tab { background: #0f172a; border: 1px solid var(--border-color); padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; white-space: nowrap; cursor: pointer; color: var(--text-muted); } 
-.cat-tab.active { background: var(--accent-color); color: white; border-color: var(--accent-color); font-weight: bold; } 
-.year-chip { background: #0f172a; border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 16px; font-size: 0.8rem; cursor: pointer; color: var(--text-muted); } 
-.year-chip.active { background: var(--accent-color); color: white; border-color: var(--accent-color); font-weight: bold; } 
-.emoji-grid-cell { font-size: 1.8rem; cursor: pointer; padding: 6px; border-radius: 8px; text-align: center; } 
-.emoji-grid-cell:active { transform: scale(1.3); background: rgba(59, 130, 246, 0.2); } 
-</style> 
-</head> 
-<body> 
-<div id="toastContainer"></div> 
+<!doctype html>
+<html lang="de" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0f1d">
+<meta name="color-scheme" content="dark light">
+<title>Reiseplaner</title>
+<script>try{var t=localStorage.getItem('reisen_theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
+<style>
+/* ============ Design-Tokens ============ */
+:root {
+  --bg: #0a0f1d;
+  --bg-2: #0e1527;
+  --surface: #121a2f;
+  --surface-2: #18223b;
+  --surface-3: #1f2b48;
+  --border: rgba(148, 163, 200, .14);
+  --border-strong: rgba(148, 163, 200, .28);
+  --text: #e9edf7;
+  --muted: #93a0bd;
+  --faint: #66738f;
+  --accent: #5b9dff;
+  --accent-2: #8b6bff;
+  --accent-soft: rgba(91, 157, 255, .15);
+  --ok: #2fd4a1;
+  --warn: #ffb547;
+  --danger: #ff5d73;
+  --danger-soft: rgba(255, 93, 115, .14);
+  --shadow: 0 18px 48px rgba(2, 6, 20, .5);
+  --shadow-sm: 0 2px 10px rgba(2, 6, 20, .32);
+  --radius: 20px;
+  --radius-sm: 12px;
+  --nav-h: 68px;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --glow-1: rgba(139, 107, 255, .14);
+  --glow-2: rgba(91, 157, 255, .13);
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  --bg: #f2f5fb;
+  --bg-2: #e9eef8;
+  --surface: #ffffff;
+  --surface-2: #f1f4fb;
+  --surface-3: #e5eaf5;
+  --border: rgba(15, 23, 42, .09);
+  --border-strong: rgba(15, 23, 42, .2);
+  --text: #101828;
+  --muted: #55627d;
+  --faint: #8691a8;
+  --accent: #2f6df6;
+  --accent-2: #6d4aff;
+  --accent-soft: rgba(47, 109, 246, .1);
+  --ok: #0f9f74;
+  --warn: #c77700;
+  --danger: #e03150;
+  --danger-soft: rgba(224, 49, 80, .09);
+  --shadow: 0 18px 48px rgba(30, 41, 80, .16);
+  --shadow-sm: 0 1px 8px rgba(30, 41, 80, .08);
+  --glow-1: rgba(109, 74, 255, .1);
+  --glow-2: rgba(47, 109, 246, .1);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: light) {
+  :root[data-theme="auto"] {
+    --bg: #f2f5fb; --bg-2: #e9eef8; --surface: #ffffff; --surface-2: #f1f4fb; --surface-3: #e5eaf5;
+    --border: rgba(15, 23, 42, .09); --border-strong: rgba(15, 23, 42, .2);
+    --text: #101828; --muted: #55627d; --faint: #8691a8;
+    --accent: #2f6df6; --accent-2: #6d4aff; --accent-soft: rgba(47, 109, 246, .1);
+    --ok: #0f9f74; --warn: #c77700; --danger: #e03150; --danger-soft: rgba(224, 49, 80, .09);
+    --shadow: 0 18px 48px rgba(30, 41, 80, .16); --shadow-sm: 0 1px 8px rgba(30, 41, 80, .08);
+    --glow-1: rgba(109, 74, 255, .1); --glow-2: rgba(47, 109, 246, .1);
+    color-scheme: light;
+  }
+}
 
-<!-- START LOCATION OVERLAY MODAL --> 
-<div id="startLocationOverlay" class="modal" style="display: flex;"> 
-    <div class="auth-box" style="max-width: 400px;"> 
-        <h2 style="font-size: 1.2rem; margin-bottom: 14px; text-align: center;">📍 Startadresse wählen</h2> 
-        <div class="auth-form-group"><label>Welche Adresse möchtest du sehen?</label><input type="text" id="startAddrInput" placeholder="Ort oder PLZ..."></div> 
-        <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 14px;"> 
-            <button style="width: 100%;" onclick="submitStartLocation()">Suchen</button> 
-            <button style="width: 100%; background: #ef4444;" onclick="submitCurrentLocationStartup()">📍 Aktuellen GPS-Standort verwenden</button> 
-        </div> 
-    </div> 
-</div> 
+/* ============ Basis ============ */
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+body {
+  margin: 0;
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(1100px 560px at 85% -8%, var(--glow-1), transparent 60%),
+    radial-gradient(900px 520px at -8% 0%, var(--glow-2), transparent 55%),
+    var(--bg);
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100dvh;
+}
+body.modal-open { overflow: hidden; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+[hidden] { display: none !important; }
+h1, h2, h3, h4, p { margin: 0; }
+h1 { font-size: 1.6rem; letter-spacing: -.02em; line-height: 1.2; }
+h2 { font-size: 1.15rem; letter-spacing: -.01em; }
+h3 { font-size: 1rem; letter-spacing: -.005em; }
+a { color: var(--accent); }
+.i { width: 1.2em; height: 1.2em; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; vertical-align: -.2em; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.muted { color: var(--muted); }
+.small { font-size: .875rem; }
+.tiny { font-size: .78rem; }
+.eyebrow { font-size: .72rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--accent); }
+.num { font-variant-numeric: tabular-nums; }
 
-<!-- STANDORT MODAL --> 
-<div id="locationPickerModal" class="modal"> 
-    <div class="auth-box" style="max-width: 400px;"> 
-        <span class="close-modal" onclick="closeModal('locationPickerModal')">&times;</span> 
-        <h2 style="font-size: 1.2rem; margin-bottom: 14px; text-align: center;">📍 Standort hinzufügen</h2> 
-        <div class="auth-form-group"><label>Adresse eingeben:</label><input type="text" id="pickerAddressInput" placeholder="z.B. Berlin"></div> 
-        <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 14px;"> 
-            <button onclick="confirmLocationPickerAddress()" style="width: 100%;">Übernehmen</button> 
-            <button onclick="confirmLocationPickerGPS()" style="width: 100%; background: #ef4444;">Aktueller GPS-Standort</button> 
-        </div> 
-    </div> 
-</div> 
+/* Layout-Helfer */
+.stack { display: grid; gap: 14px; align-content: start; }
+.row { display: flex; align-items: center; gap: 10px; }
+.wrap { flex-wrap: wrap; }
+.between { justify-content: space-between; }
+.grow { flex: 1; min-width: 0; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
-<!-- GIF MODAL --> 
-<div id="gifPickerModal" class="modal"> 
-    <div class="modal-content" style="max-width: 500px;"> 
-        <span class="close-modal" onclick="closeModal('gifPickerModal')">&times;</span> 
-        <h3 style="margin-top:0; color: var(--accent-color);">🖼️ GIF wählen</h3> 
-        <div class="search-box"><input type="text" id="gifSearchInput" placeholder="GIFs suchen..." oninput="searchGiphyGifs()"></div> 
-        <div id="giphyResultsContainer" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; max-height: 350px; overflow-y: auto; padding-right: 4px;"></div> 
-    </div> 
-</div> 
+/* ============ Karten ============ */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow-sm);
+}
+.card > h3 + * { margin-top: 12px; }
 
-<!-- YOUTUBE / LINK MODAL --> 
-<div id="linkPickerModal" class="modal"> 
-    <div class="auth-box" style="max-width: 420px;"> 
-        <span class="close-modal" onclick="closeModal('linkPickerModal')">&times;</span> 
-        <h2 style="font-size: 1.2rem; margin-bottom: 14px; text-align: center;" id="linkModalTitle">🎥 YouTube Video oder Link</h2> 
-        <div class="auth-form-group"><label id="linkModalLabel">URL:</label><input type="text" id="linkPickerUrlInput" placeholder="https://..."></div> 
-        <button onclick="confirmLinkAttachment()" style="width: 100%; margin-top: 10px;">Link & Vorschau hinzufügen</button> 
-    </div> 
-</div> 
+/* ============ Buttons ============ */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 44px; padding: 0 18px; border: 1px solid transparent; border-radius: 14px;
+  font-weight: 650; font-size: .95rem; line-height: 1; white-space: nowrap;
+  background: var(--surface-3); color: var(--text);
+  transition: transform .12s ease, filter .15s ease, background .15s ease, border-color .15s ease;
+}
+.btn:hover { filter: brightness(1.08); }
+.btn:active { transform: scale(.97); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 35%, transparent); }
+.btn-soft { background: var(--accent-soft); color: var(--accent); }
+.btn-ghost { background: transparent; border-color: var(--border-strong); }
+.btn-danger { background: var(--danger-soft); color: var(--danger); }
+.btn-ok { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.btn-icon { width: 44px; padding: 0; }
+.btn-sm { min-height: 36px; padding: 0 12px; font-size: .85rem; border-radius: 11px; }
+.btn-sm.btn-icon { width: 36px; padding: 0; }
+.btn-block { width: 100%; }
 
-<!-- UMFRAGE MODAL --> 
-<div id="pollPickerModal" class="modal"> 
-    <div class="auth-box" style="max-width: 420px;"> 
-        <span class="close-modal" onclick="closeModal('pollPickerModal')">&times;</span> 
-        <h2 style="font-size: 1.2rem; margin-bottom: 14px; text-align: center;">📊 Umfrage erstellen</h2> 
-        <div class="auth-form-group"><label>Frage:</label><input type="text" id="pollQuestionInput" placeholder="Frage eingeben..."></div> 
-        <div class="auth-form-group"><label>Option 1:</label><input type="text" id="pollOpt1" placeholder="Antwort 1"></div> 
-        <div class="auth-form-group"><label>Option 2:</label><input type="text" id="pollOpt2" placeholder="Antwort 2"></div> 
-        <button onclick="confirmPollAttachment()" style="width: 100%; margin-top: 10px;">Umfrage erstellen</button> 
-    </div> 
-</div> 
+/* ============ Formulare ============ */
+.field { display: grid; gap: 6px; }
+.field > label, .label { font-size: .78rem; font-weight: 650; color: var(--muted); }
+input[type="text"], input[type="password"], input[type="date"], input[type="time"], input[type="search"], input[type="url"], textarea, select {
+  width: 100%; min-height: 46px; padding: 11px 14px;
+  background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+textarea { resize: vertical; min-height: 96px; line-height: 1.5; }
+input::placeholder, textarea::placeholder { color: var(--faint); }
+input:focus, textarea:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+input[type="range"] { width: 100%; accent-color: var(--accent); height: 28px; margin: 0; }
+.search { position: relative; display: flex; gap: 8px; }
+.search .i { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--faint); pointer-events: none; }
+.search input { padding-left: 42px; }
+.hint { font-size: .8rem; color: var(--muted); }
 
-<!-- AUTH OVERLAY --> 
-<div id="authOverlay"> 
-    <div class="auth-box"> 
-        <h2>Reisen 🌍✈️</h2> 
-        <div class="auth-form-group"><label>Benutzername</label><input type="text" id="loginUser" placeholder="admin" value="admin"></div> 
-        <div class="auth-form-group"><label>Passwort</label><input type="password" id="loginPass" placeholder="admin" value="admin"></div> 
-        <button style="width: 100%; margin-top: 6px;" onclick="handleLogin()">Einloggen</button> 
-    </div> 
-</div> 
+/* Chips + Segmented */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 7px 13px; min-height: 36px;
+  border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2);
+  color: var(--muted); font-size: .85rem; font-weight: 600;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.chip b { font-weight: 700; color: var(--faint); font-variant-numeric: tabular-nums; }
+.chip[aria-pressed="true"] { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 55%, transparent); color: var(--text); }
+.chip[aria-pressed="false"] { opacity: .65; }
+.seg { display: inline-flex; padding: 4px; gap: 4px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 14px; }
+.seg button { border: 0; background: transparent; color: var(--muted); padding: 8px 14px; border-radius: 10px; font-weight: 650; min-height: 36px; }
+.seg button[aria-pressed="true"] { background: var(--surface-3); color: var(--text); box-shadow: var(--shadow-sm); }
 
-<!-- POI LISTE MODAL --> 
-<div id="poiListModal" class="modal"> 
-    <div class="modal-content" style="max-width: 700px;"> 
-        <span class="close-modal" onclick="closeModal('poiListModal')">&times;</span> 
-        <h3 style="margin-top:0; color: var(--accent-color);">📋 POI Übersicht im Radius</h3> 
-        <div class="category-tab-bar" id="poiCategoryTabBar"></div> 
-        <div class="auth-form-group"><input type="text" id="poiSearchModalInput" placeholder="POIs suchen..." oninput="renderPoiListModalContent()"></div> 
-        <div id="poiListModalContainer" style="max-height: 420px; overflow-y: auto;"></div> 
-    </div> 
-</div> 
+/* ============ App-Gerüst ============ */
+.app { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 100dvh; }
+.main { width: 100%; max-width: 1240px; margin: 0 auto; padding: 18px 16px calc(var(--nav-h) + var(--safe-b) + 28px); }
+.view-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; margin-bottom: 16px; flex-wrap: wrap; }
+.view-head h1 { margin-top: 2px; word-break: break-word; }
 
-<!-- ANTWORTEN MODAL --> 
-<div id="replyModal" class="modal"> 
-    <div class="modal-content" style="max-width: 550px;"> 
-        <span class="close-modal" onclick="closeModal('replyModal')">&times;</span> 
-        <h3 style="margin-top:0; color: var(--accent-color);">💬 Auf Beitrag antworten</h3> 
-        <input type="hidden" id="replyPostId"> 
-        <div class="auth-form-group"><textarea id="replyText" rows="3" placeholder="Antwort schreiben..."></textarea></div> 
-        <div class="unified-media-toolbar"> 
-            <label class="media-btn media-btn-img" style="cursor:pointer;">📸 Bild <input type="file" accept="image/*" style="display:none;" onchange="handleFileUpload(event, 'reply')"></label> 
-            <label class="media-btn media-btn-vid" style="cursor:pointer;">🎥 Video <input type="file" accept="video/*" style="display:none;" onchange="handleFileUpload(event, 'reply')"></label> 
-            <button class="media-btn media-btn-gif" onclick="openGifPicker('reply')">🖼️ GIF</button> 
-            <button class="media-btn media-btn-loc" onclick="openLocationPicker('reply')">📍 Standort</button> 
-            <button class="media-btn media-btn-yt" onclick="openLinkPicker('reply', 'yt')">🎥 YouTube</button> 
-            <button class="media-btn media-btn-reddit" onclick="openLinkPicker('reply', 'reddit')">🔴 Reddit</button> 
-            <button class="media-btn media-btn-poll" onclick="openPollPicker('reply')">📊 Umfrage</button> 
-        </div> 
-        <div id="replyMediaAttachmentIndicator" style="font-size:0.8rem; color:#34d399; margin-bottom:6px;"></div> 
-        <button onclick="submitReply()" style="width: 100%;">Antwort absenden</button> 
-    </div> 
-</div> 
+/* Tabbar (mobil) */
+.tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 900;
+  height: calc(var(--nav-h) + var(--safe-b)); padding: 0 8px var(--safe-b);
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  background: color-mix(in srgb, var(--surface) 84%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4); backdrop-filter: blur(18px) saturate(1.4);
+  border-top: 1px solid var(--border);
+}
+.nav-btn {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  background: none; border: 0; color: var(--muted); font-size: .72rem; font-weight: 650;
+}
+.nav-btn .i { width: 24px; height: 24px; padding: 0; transition: transform .15s; }
+.nav-btn.active { color: var(--accent); }
+.nav-btn.active .i { transform: translateY(-1px) scale(1.08); }
 
-<!-- EMOJI MODAL --> 
-<div id="emojiModal" class="modal"> 
-    <div class="modal-content" style="max-width: 450px; text-align: center;"> 
-        <span class="close-modal" onclick="closeModal('emojiModal')">&times;</span> 
-        <h3 style="margin-top:0; color: var(--accent-color);">😀 Emoji auswählen</h3> 
-        <input type="hidden" id="emojiPostId"> 
-        <input type="text" id="emojiSearchInput" placeholder="Suchen..." oninput="handleEmojiSearchInput()" style="margin-bottom:10px;"> 
-        <div id="emojiGridContainer" style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-bottom: 12px; min-height: 200px; max-height: 280px; overflow-y: auto;"></div> 
-        <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid var(--border-color); padding-top:10px;"> 
-            <button onclick="prevEmojiPage()" style="padding:6px 14px; font-size:0.85rem; background:#334155;">◀ Zurück</button> 
-            <span id="emojiPageIndicator" style="font-size:0.85rem; color:var(--text-muted);">Seite 1</span> 
-            <button onclick="nextEmojiPage()" style="padding:6px 14px; font-size:0.85rem; background:#334155;">Weiter ▶</button> 
-        </div> 
-    </div> 
-</div> 
+/* Seitenleiste (Desktop) */
+.rail { display: none; }
+@media (min-width: 900px) {
+  .app { grid-template-columns: 250px minmax(0, 1fr); }
+  .tabbar { display: none; }
+  .main { padding: 28px 32px 48px; }
+  .rail {
+    display: flex; flex-direction: column; gap: 6px; position: sticky; top: 0; height: 100dvh;
+    padding: 22px 16px; border-right: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface) 70%, transparent);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  }
+  .rail .nav-btn {
+    flex-direction: row; justify-content: flex-start; gap: 12px; padding: 12px 14px;
+    border-radius: 14px; font-size: .95rem;
+  }
+  .rail .nav-btn:hover { background: var(--surface-2); }
+  .rail .nav-btn.active { background: var(--accent-soft); }
+  .rail .nav-btn.active .i { transform: none; }
+}
+.brand { display: flex; align-items: center; gap: 12px; padding: 4px 6px 18px; }
+.brand .logo { width: 40px; height: 40px; border-radius: 13px; font-size: 20px; }
+.brand strong { font-size: 1.1rem; letter-spacing: -.02em; }
+.rail-foot { margin-top: auto; padding: 12px 8px 0; border-top: 1px solid var(--border); }
+.logo {
+  width: 60px; height: 60px; border-radius: 19px; display: grid; place-items: center; font-size: 30px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2)); box-shadow: 0 10px 28px color-mix(in srgb, var(--accent) 40%, transparent);
+}
 
-<!-- STRECKENPLANER MODAL --> 
-<div id="routeDrawingModal" class="modal"> 
-    <div class="modal-content" style="max-width: 750px;"> 
-        <span class="close-modal" onclick="closeModal('routeDrawingModal')">&times;</span> 
-        <h3 style="margin-top:0; color: var(--accent-color);">🗺️ Exakter Streckenplaner</h3> 
-        <div id="routeDrawMap" class="map-container" style="height: 220px; margin-bottom: 10px;"></div> 
-        <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;"> 
-            <button onclick="addDrawnPointViaGPS()" style="background: #ef4444; font-size: 0.85rem;">📍 Aktuellen GPS-Standort als Nadel</button> 
-            <button onclick="connectRoutePins()" style="background: #10b981; font-size: 0.85rem;">🔄 Verbinden</button> 
-            <button onclick="undoLastPin()" style="background: #f59e0b; font-size: 0.85rem;">⬅️ Letzte löschen</button> 
-            <button onclick="clearDrawnRoutePoints()" style="background: #ef4444; font-size: 0.85rem;">🗑️ Neu</button> 
-        </div> 
-        <div id="pinStatusIndicator" style="font-size: 0.85rem; color: #34d399; margin-bottom: 10px; font-weight: 600;">Klicke auf die Karte oder nutze den GPS-Button, um Nadeln zu setzen.</div> 
-        <div id="pinsListContainer" style="display: flex; flex-direction: column; gap: 8px; max-height: 180px; overflow-y: auto; margin-bottom: 12px;"></div> 
-        
-        <div class="auth-form-group"> 
-            <label style="font-weight: 600;">🚀 Transportmittel</label> 
-            <select id="routeMovementType" onchange="redrawRouteDrawMap()"> 
-                <option value="walking">🚶 Zu Fuß</option> 
-                <option value="bicycle">🚲 Fahrrad</option> 
-                <option value="car" selected>🚗 Auto</option> 
-                <option value="airplane">✈️ Flugzeug</option> 
-                <option value="boat">⛵ Boot</option> 
-                <option value="train">🚆 Zug</option> 
-                <option value="bus">🚌 Bus</option> 
-                <option value="motorcycle">🏍️ Motorrad</option> 
-            </select> 
-        </div> 
+/* ============ Login ============ */
+.auth {
+  position: fixed; inset: 0; z-index: 3000; display: grid; place-items: center; padding: 20px; overflow: auto;
+  background:
+    radial-gradient(900px 500px at 80% 0%, var(--glow-1), transparent 60%),
+    radial-gradient(800px 500px at 0% 100%, var(--glow-2), transparent 60%),
+    var(--bg);
+}
+.auth-card { width: 100%; max-width: 400px; padding: 28px; display: grid; gap: 16px; box-shadow: var(--shadow); }
+.auth-card h1 { margin-top: 4px; }
 
-        <div class="auth-form-group"><label>Titel</label><input type="text" id="drawModalTitle" placeholder="Tourenname..."></div> 
-        <div style="display:flex; gap:8px; margin-bottom:12px;">
-            <div class="auth-form-group" style="flex:1; margin-bottom:0;"><label>Datum</label><input type="date" id="drawModalDate"></div>
-            <div class="auth-form-group" style="flex:1; margin-bottom:0;"><label>Uhrzeit</label><input type="time" id="drawModalTime"></div>
+/* ============ Karte ============ */
+.map-layout { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+.map-layout > *, .stack > * { min-width: 0; }
+@media (min-width: 1000px) {
+  .map-layout { grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr); align-items: start; }
+}
+.map-wrap { position: relative; }
+.map {
+  height: min(56dvh, 540px); min-height: 300px; border-radius: var(--radius); overflow: hidden;
+  border: 1px solid var(--border); box-shadow: var(--shadow-sm); background: var(--surface-2); z-index: 1;
+}
+.map.tall { height: min(64dvh, 520px); }
+.map-overlay {
+  position: absolute; inset: 0; z-index: 500; display: flex; align-items: center; justify-content: center; gap: 10px;
+  border-radius: var(--radius); background: color-mix(in srgb, var(--bg) 62%, transparent);
+  -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); font-weight: 650; text-align: center; padding: 20px;
+}
+.spinner { width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid var(--border-strong); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.me-marker span { display: block; width: 22px; height: 22px; border-radius: 50%; background: var(--accent, #5b9dff); border: 3px solid #fff; box-shadow: 0 0 0 6px rgba(91, 157, 255, .28), 0 4px 12px rgba(0, 0, 0, .4); }
+.poi-pin { width: 30px; height: 30px; border-radius: 50%; border: 2px solid #fff; display: grid; place-items: center; font-size: 15px; box-shadow: 0 3px 10px rgba(0, 0, 0, .45); }
+.num-pin { width: 28px; height: 28px; border-radius: 50%; border: 2px solid #fff; display: grid; place-items: center; font-size: 12px; font-weight: 800; color: #fff; box-shadow: 0 3px 10px rgba(0, 0, 0, .45); }
+/* ---- eigene Kartenansicht ---- */
+.gm { position: relative; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; outline: none;
+  background-color: var(--surface-2);
+  background-image: linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 64px 64px; font-family: inherit; }
+.gm:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.gm.gm-grab { cursor: grabbing; }
+.gm-pane { position: absolute; left: 0; top: 0; width: 0; height: 0; will-change: transform; }
+.gm-tiles, .gm-marks, .gm-pops { position: absolute; left: 0; top: 0; }
+.gm-tile { position: absolute; left: 0; top: 0; width: 256px; height: 256px; max-width: none; opacity: 0; transition: opacity .18s; pointer-events: none; }
+.gm-tile.ok { opacity: 1; }
+.gm-vec { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.gm-marker { position: absolute; left: 0; top: 0; cursor: pointer; touch-action: none; }
+.gm-marker.gm-dragging { cursor: grabbing; }
+.gm-marker:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 50%; }
+.gm-pops { z-index: 2000000; }
+.gm-popup { position: absolute; left: 0; top: 0; width: 0; height: 0; }
+.gm-popup-box { position: absolute; left: 0; transform: translateX(-50%); width: max-content; min-width: 140px; max-width: min(300px, 76vw); padding: 14px 34px 14px 16px; border-radius: 16px; background: var(--surface); color: var(--text); box-shadow: var(--shadow); border: 1px solid var(--border); font-size: 14px; line-height: 1.45; cursor: default; user-select: text; -webkit-user-select: text; }
+.gm-popup-box::after { content: ""; position: absolute; left: 50%; bottom: -7px; width: 12px; height: 12px; background: var(--surface); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); transform: translateX(-50%) rotate(45deg); }
+.gm-popup-box a { color: var(--accent); }
+.gm-popup-x { position: absolute; top: 6px; right: 6px; width: 28px; height: 28px; border-radius: 50%; border: 0; background: transparent; color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; }
+.gm-popup-x:hover { background: var(--surface-2); color: var(--text); }
+.gm-ctl { position: absolute; inset: 0; z-index: 3000000; pointer-events: none; }
+.gm-corner { position: absolute; display: flex; flex-direction: column; gap: 8px; padding: 10px; }
+.gm-tl { left: 0; top: 0; align-items: flex-start; } .gm-tr { right: 0; top: 0; align-items: flex-end; }
+.gm-bl { left: 0; bottom: 0; align-items: flex-start; } .gm-br { right: 0; bottom: 0; align-items: flex-end; max-width: 70%; }
+.gm-bar, .gm-layers, .gm-scale, .gm-attr { pointer-events: auto; }
+.gm-bar { display: flex; flex-direction: column; border-radius: 12px; overflow: hidden; border: 1px solid var(--border); box-shadow: var(--shadow-sm); background: var(--surface); }
+.gm-btn { width: 38px; height: 38px; display: grid; place-items: center; border: 0; background: var(--surface); color: var(--text); font-size: 20px; font-weight: 600; cursor: pointer; }
+.gm-bar .gm-btn + .gm-btn { border-top: 1px solid var(--border); }
+.gm-btn:hover:not(:disabled) { background: var(--surface-2); }
+.gm-btn:disabled { color: var(--muted); opacity: .5; cursor: default; }
+.gm-btn .i { width: 20px; height: 20px; }
+.gm-layers { position: relative; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.gm-layers-btn { border-radius: 12px; border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
+.gm-menu { display: flex; flex-direction: column; padding: 4px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow); }
+.gm-menu[hidden] { display: none; }
+.gm-opt { text-align: left; padding: 9px 14px; border: 0; border-radius: 9px; background: transparent; color: var(--text); font: inherit; font-size: 14px; cursor: pointer; white-space: nowrap; }
+.gm-opt:hover { background: var(--surface-2); }
+.gm-opt[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 650; }
+.gm-scale { min-width: 30px; padding: 1px 6px 2px; border: 2px solid var(--text); border-top: 0; color: var(--text); font-size: 11px; font-weight: 650; background: color-mix(in srgb, var(--surface) 70%, transparent); white-space: nowrap; }
+.gm-attr { padding: 2px 8px; border-radius: 8px; background: color-mix(in srgb, var(--surface) 82%, transparent); color: var(--muted); font-size: 10px; line-height: 1.5; }
+.gm-attr a { color: var(--muted); }
+.gm-msg { position: absolute; left: 50%; top: 58px; transform: translateX(-50%); z-index: 3000001; width: min(440px, calc(100% - 28px)); padding: 10px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border-strong); box-shadow: var(--shadow); color: var(--text); font-size: 13px; line-height: 1.4; pointer-events: none; text-align: center; }
+.gm-msg[hidden] { display: none; }
+.pop-title { font-weight: 700; margin-bottom: 2px; }
+.pop-meta { color: var(--muted); font-size: 13px; }
+
+/* ============ Wetter ============ */
+.wx-now { display: flex; align-items: center; gap: 16px; }
+.wx-temp { font-size: 3rem; font-weight: 750; letter-spacing: -.04em; line-height: 1; }
+.wx-emoji { font-size: 3rem; line-height: 1; }
+.wx-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
+.stat { padding: 10px 12px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--border); }
+.stat span { display: block; font-size: .72rem; color: var(--muted); font-weight: 650; }
+.stat strong { font-size: 1.02rem; font-variant-numeric: tabular-nums; }
+.wx-hours { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0 8px; margin-top: 12px; scroll-snap-type: x proximity; scrollbar-width: thin; }
+.wx-hour { flex: none; scroll-snap-align: start; width: 64px; text-align: center; padding: 10px 4px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--border); font-size: .8rem; }
+.wx-hour .e { font-size: 1.3rem; display: block; margin: 2px 0; }
+.wx-hour b { display: block; font-size: .95rem; }
+.wx-days { display: grid; gap: 6px; margin-top: 4px; }
+.wx-day { display: grid; grid-template-columns: 54px 30px 1fr auto; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--border); font-size: .9rem; }
+.wx-day .e { font-size: 1.3rem; text-align: center; line-height: 1; }
+.wx-day .rain { color: var(--muted); font-size: .78rem; }
+.wx-day em { font-style: normal; color: var(--muted); margin-left: 8px; }
+.wind-box { display: flex; align-items: center; gap: 18px; }
+.compass { width: 84px; height: 84px; border-radius: 50%; border: 1px solid var(--border-strong); background: var(--surface-2); position: relative; flex: none; }
+.compass i { position: absolute; left: 50%; top: 50%; width: 4px; height: 34px; margin: -34px 0 0 -2px; border-radius: 3px; background: linear-gradient(var(--accent), transparent); transform-origin: 50% 100%; }
+.compass span { position: absolute; font-size: 10px; font-weight: 700; color: var(--faint); }
+.compass .n { top: 3px; left: 50%; transform: translateX(-50%); }
+.compass .s { bottom: 3px; left: 50%; transform: translateX(-50%); }
+.compass .o { right: 6px; top: 50%; transform: translateY(-50%); }
+.compass .w { left: 6px; top: 50%; transform: translateY(-50%); }
+
+/* Skeleton */
+.skeleton { background: linear-gradient(100deg, var(--surface-2) 30%, var(--surface-3) 50%, var(--surface-2) 70%); background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: 12px; min-height: 56px; }
+@keyframes shimmer { to { background-position: -200% 0; } }
+
+/* ============ Beiträge ============ */
+.composer textarea { min-height: 88px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 6px; }
+.tbtn {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px; border-radius: 11px; cursor: pointer;
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); font-size: .82rem; font-weight: 650;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.tbtn:hover { color: var(--text); border-color: var(--border-strong); }
+.tbtn.t-img .i { color: var(--accent); } .tbtn.t-vid .i { color: var(--ok); } .tbtn.t-gif .i { color: var(--accent-2); }
+.tbtn.t-emoji .i { color: var(--warn); }
+.tbtn.t-loc .i { color: #14b8a6; } .tbtn.t-yt .i { color: #ff4b4b; } .tbtn.t-red .i { color: #ff6a2b; } .tbtn.t-poll .i { color: var(--warn); }
+.draft { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 8px 10px; border-radius: 14px; background: var(--accent-soft); font-size: .85rem; }
+.draft:empty { display: none; }
+.draft img, .draft video { width: 44px; height: 44px; border-radius: 10px; object-fit: cover; background: var(--surface-3); }
+.post { display: grid; gap: 12px; }
+.post-head { display: flex; align-items: center; gap: 12px; }
+.avatar { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; color: #fff; background: linear-gradient(135deg, var(--accent), var(--accent-2)); flex: none; text-transform: uppercase; }
+.avatar.sm { width: 30px; height: 30px; font-size: .8rem; }
+.post-text { white-space: pre-wrap; word-break: break-word; }
+.post-actions { display: flex; gap: 8px; }
+.replies { display: grid; gap: 10px; padding-left: 14px; margin-left: 20px; border-left: 2px solid var(--border-strong); }
+.reply { display: grid; gap: 8px; padding: 10px 12px; border-radius: 14px; background: var(--surface-2); }
+
+/* Anhänge */
+.att { margin-top: 2px; }
+.att img, .att video { display: block; max-width: 100%; max-height: 420px; border-radius: 14px; background: var(--surface-2); }
+.att-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--border); text-decoration: none; color: var(--text); }
+.att-card .ico { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; flex: none; background: var(--accent-soft); color: var(--accent); }
+.att-card small { display: block; color: var(--muted); word-break: break-all; }
+.att-yt { position: relative; display: block; border-radius: 14px; overflow: hidden; background: #000; }
+.att-yt img { width: 100%; max-height: none; border-radius: 0; opacity: .92; }
+.att-yt .play { position: absolute; inset: 0; display: grid; place-items: center; }
+.att-yt .play span { width: 62px; height: 44px; border-radius: 14px; background: #ff0033; display: grid; place-items: center; color: #fff; box-shadow: 0 6px 20px rgba(0, 0, 0, .5); }
+.poll { display: grid; gap: 8px; padding: 12px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--border); }
+.poll-opt { position: relative; overflow: hidden; text-align: left; min-height: 42px; padding: 0 14px; border-radius: 11px; border: 1px solid var(--border); background: var(--surface); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.poll-opt .bar { position: absolute; inset: 0 auto 0 0; background: var(--accent-soft); z-index: 0; transition: width .3s; }
+.poll-opt > * { position: relative; z-index: 1; }
+.poll-opt.mine { border-color: var(--accent); }
+
+/* ============ Reisen ============ */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+.stat-tile { padding: 14px; border-radius: 16px; background: var(--surface-2); border: 1px solid var(--border); }
+.stat-tile .k { font-size: .78rem; color: var(--muted); font-weight: 650; display: flex; align-items: center; gap: 6px; }
+.stat-tile .v { font-size: 1.35rem; font-weight: 750; letter-spacing: -.02em; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.stat-tile.total { background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 22%, var(--surface-2)), color-mix(in srgb, var(--accent-2) 18%, var(--surface-2))); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+.log { display: grid; gap: 14px; }
+.log-item { display: grid; gap: 10px; }
+.log-head { display: flex; align-items: flex-start; gap: 12px; }
+.log-ico { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; font-size: 22px; flex: none; }
+.badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px; font-size: .74rem; font-weight: 650; background: var(--surface-3); color: var(--muted); }
+.badge.ok { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.stations { display: grid; margin-top: 4px; }
+.station { position: relative; padding: 0 0 0 30px; }
+.station::before { content: ""; position: absolute; left: 9px; top: 24px; bottom: -2px; width: 2px; background: repeating-linear-gradient(var(--c, var(--accent)) 0 5px, transparent 5px 9px); }
+.station:last-child::before { display: none; }
+.station .dot { position: absolute; left: 0; top: 2px; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 800; color: #fff; background: var(--c, var(--accent)); }
+.station .st-title { font-weight: 650; }
+.station .st-seg { margin: 6px 0 12px; font-size: .8rem; font-weight: 650; color: var(--c, var(--accent)); }
+.station .st-body { padding-bottom: 4px; display: grid; gap: 6px; }
+.empty { text-align: center; padding: 34px 16px; color: var(--muted); }
+.empty .big { font-size: 2.4rem; margin-bottom: 6px; }
+.pin-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--border); }
+.pin-row .n { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: .75rem; font-weight: 800; background: var(--accent); color: #fff; flex: none; }
+.pin-list { display: grid; gap: 8px; max-height: 190px; overflow-y: auto; }
+.status-line { font-size: .85rem; color: var(--ok); font-weight: 650; }
+
+/* ============ Konto ============ */
+.section-title { font-size: .72rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); margin: 8px 4px -4px; }
+.kv { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.kv:last-child { border-bottom: 0; }
+
+/* ============ Modals ============ */
+.modal {
+  position: fixed; inset: 0; z-index: 2000; display: none; align-items: flex-end; justify-content: center;
+  background: rgba(3, 7, 18, .62); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.modal.open { display: flex; animation: fade .18s ease; }
+.sheet {
+  width: 100%; max-width: 580px; max-height: 93dvh; overflow-y: auto; overscroll-behavior: contain;
+  background: var(--surface); border: 1px solid var(--border); border-bottom: 0;
+  border-radius: 26px 26px 0 0; padding: 10px 18px calc(20px + var(--safe-b)); box-shadow: var(--shadow);
+  animation: sheetUp .26s cubic-bezier(.2, .9, .3, 1);
+}
+.sheet.wide { max-width: 760px; }
+.grab { width: 42px; height: 4px; border-radius: 4px; background: var(--border-strong); margin: 2px auto 10px; }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; position: sticky; top: -10px; padding: 6px 0; background: var(--surface); z-index: 3; }
+.sheet .stack { gap: 14px; }
+@media (min-width: 700px) {
+  .modal { align-items: center; padding: 24px; }
+  .sheet { border-radius: 26px; border-bottom: 1px solid var(--border); animation: pop .22s cubic-bezier(.2, .9, .3, 1); }
+  .grab { display: none; }
+}
+@keyframes sheetUp { from { transform: translateY(40px); opacity: 0; } }
+@keyframes pop { from { transform: scale(.96); opacity: 0; } }
+@keyframes fade { from { opacity: 0; } }
+.gif-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
+.gif-grid img { width: 100%; height: 110px; object-fit: cover; border-radius: 12px; cursor: pointer; background: var(--surface-2); transition: transform .15s; }
+.gif-grid img:hover { transform: scale(1.03); }
+.emoji-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
+.emoji-grid button { aspect-ratio: 1; border: 0; background: transparent; border-radius: 10px; font-size: 1.5rem; }
+.emoji-grid button:hover { background: var(--surface-2); }
+.poi-item { display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--border); text-align: left; width: 100%; }
+.poi-item .ico { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-size: 18px; flex: none; }
+.poi-item .t { font-weight: 650; }
+.poi-list { display: grid; gap: 8px; }
+
+/* ============ Toast ============ */
+.toast-host { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--nav-h) + var(--safe-b) + 14px); z-index: 4000; display: grid; gap: 8px; width: min(92vw, 420px); pointer-events: none; }
+@media (min-width: 900px) { .toast-host { bottom: 24px; } }
+.toast { padding: 12px 16px; border-radius: 14px; background: var(--surface-3); border: 1px solid var(--border-strong); box-shadow: var(--shadow); font-weight: 600; font-size: .9rem; animation: sheetUp .22s ease; pointer-events: auto; }
+.toast.ok { border-color: color-mix(in srgb, var(--ok) 55%, transparent); }
+.toast.err { border-color: color-mix(in srgb, var(--danger) 60%, transparent); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}
+
+/* ============ Ortssuche: Trefferliste ============ */
+.suggest-host { position: relative; }
+.suggest { list-style: none; margin: 0; padding: 6px; display: grid; gap: 2px; border-radius: 16px; background: var(--surface); border: 1px solid var(--border-strong); box-shadow: var(--shadow); max-height: min(60dvh, 380px); overflow-y: auto; }
+.suggest[hidden] { display: none; }
+.suggest-host > .suggest { position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 60; }
+.suggest.inline { margin-top: 8px; box-shadow: none; background: var(--surface-2); }
+.suggest button { width: 100%; display: flex; gap: 12px; align-items: flex-start; text-align: left; padding: 10px 12px; border: 0; border-radius: 11px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.suggest button:hover, .suggest button.active { background: var(--accent-soft); }
+.s-ic { color: var(--accent); flex: none; padding-top: 2px; }
+.s-tx { display: grid; min-width: 0; gap: 1px; }
+.s-tx b { font-weight: 650; overflow-wrap: anywhere; }
+.s-tx span { color: var(--muted); font-size: .82rem; overflow-wrap: anywhere; }
+.suggest-info { padding: 10px 12px; color: var(--muted); font-size: .9rem; }
+
+/* ============ Orte: Gruppen + Status ============ */
+.poi-groups { display: grid; gap: 14px; margin-top: 12px; }
+.poi-group h4 { margin: 0 0 6px; font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.poi-status { margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); font-size: .88rem; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.poi-status.err { border-color: color-mix(in srgb, #ef4444 55%, var(--border)); }
+.pop-links { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-weight: 650; }
+.pop-links a { text-decoration: none; }
+
+/* ============ Mitglieder, Meldungen, Verbindungstest ============ */
+.form-msg { margin: 0; padding: 10px 12px; border-radius: 12px; font-size: .9rem; line-height: 1.4; border: 1px solid var(--border); background: var(--surface-2); }
+.form-msg[hidden] { display: none; }
+.form-msg.err { border-color: color-mix(in srgb, #ef4444 55%, var(--border)); background: color-mix(in srgb, #ef4444 12%, var(--surface-2)); }
+.form-msg.ok { border-color: color-mix(in srgb, #22c55e 55%, var(--border)); background: color-mix(in srgb, #22c55e 13%, var(--surface-2)); }
+.form-msg.warn { border-color: color-mix(in srgb, #f59e0b 60%, var(--border)); background: color-mix(in srgb, #f59e0b 14%, var(--surface-2)); }
+.check { display: flex; align-items: center; gap: 8px; font-size: .9rem; color: var(--muted); cursor: pointer; }
+.check input { width: 18px; height: 18px; accent-color: var(--accent); }
+.member-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--border); }
+.member-row.col { flex-direction: column; align-items: stretch; gap: 10px; }
+.member-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.btn-ok { background: #16a34a; color: #fff; border: 0; }
+.btn-ok:hover { background: #15803d; }
+.btn-no { background: #dc2626; color: #fff; border: 0; }
+.btn-no:hover { background: #b91c1c; }
+.count-pill { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 7px; border-radius: 999px; background: var(--accent); color: #fff; font-size: .75rem; font-weight: 700; }
+.count-pill[hidden] { display: none; }
+.nav-btn { position: relative; }
+.nav-badge { position: absolute; top: 4px; right: 8px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: #ef4444; color: #fff; font-size: .68rem; font-weight: 700; font-style: normal; display: grid; place-items: center; }
+.nav-badge[hidden] { display: none; }
+.rail .nav-btn .nav-badge { position: static; margin-left: auto; }
+.diag { display: grid; gap: 6px; }
+.diag-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); }
+.d-ic { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; font-size: .8rem; font-weight: 800; background: var(--surface-3); flex: none; }
+.diag-row.ok .d-ic { background: #16a34a; color: #fff; } .diag-row.bad .d-ic { background: #dc2626; color: #fff; } .diag-row.warn .d-ic { background: #f59e0b; color: #1c1917; }
+
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m4.5 12.5 5 5 10-11"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M14 9l2 2"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5z"/><path d="m3 13 9 5 9-5"/></symbol>
+    <symbol id="i-map" viewBox="0 0 24 24"><path d="M9 4 3 6.5v13L9 17l6 3 6-2.5v-13L15 7 9 4z"/><path d="M9 4v13M15 7v13"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M2 5.5C4 4.5 7 4.5 12 7c5-2.5 8-2.5 10-1.5V19c-2-1-5-1-10 1.5C7 18 4 18 2 19V5.5z"/><path d="M12 7v13.5"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+    <symbol id="i-locate" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="m21 16-5-5-9 9"/></symbol>
+    <symbol id="i-video" viewBox="0 0 24 24"><rect x="3" y="6" width="13" height="12" rx="3"/><path d="m16 10 5-3v10l-5-3z"/></symbol>
+    <symbol id="i-film" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s7-6.2 7-12a7 7 0 1 0-14 0c0 5.8 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 5v14l12-7z"/></symbol>
+    <symbol id="i-poll" viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4 20-7z"/><path d="M22 2 11 13"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></symbol>
+    <symbol id="i-route" viewBox="0 0 24 24"><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="5" r="2.5"/><path d="M8.5 19H15a3.5 3.5 0 0 0 0-7H9a3.5 3.5 0 0 1 0-7h6.5"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18a4 4 0 0 1-.5-8A6 6 0 0 1 18 9.5 4.5 4.5 0 0 1 17.5 18H7z"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></symbol>
+    <symbol id="i-nav" viewBox="0 0 24 24"><path d="m3 11 19-9-9 19-2-8-8-2z"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="m13.5 6.5 4 4"/></symbol>
+    <symbol id="i-reply" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h9a7 7 0 0 1 7 7v3"/></symbol>
+    <symbol id="i-smile" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9.5h.01M15 9.5h.01"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 4H5v16h4M16 8l4 4-4 4M20 12H9"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 11l5 5 5-5M4 20h16"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V5M7 9l5-5 5 5M4 20h16"/></symbol>
+    <symbol id="i-loop" viewBox="0 0 24 24"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/></symbol>
+    <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 12h.01"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17h.01"/></symbol>
+  </defs>
+</svg>
+
+<div id="toastHost" class="toast-host" aria-live="polite"></div>
+
+<!-- ============ LOGIN ============ -->
+<div id="authOverlay" class="auth">
+  <form novalidate id="loginForm" class="auth-card card" autocomplete="on">
+    <div class="logo" aria-hidden="true">🌍</div>
+    <div>
+      <h1>Reiseplaner</h1>
+      <p class="muted" style="margin-top:6px">Touren planen, Erlebnisse festhalten, jede Reise im Blick.</p>
+    </div>
+    <div class="field"><label for="loginUser">Benutzername</label><input id="loginUser" type="text" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
+    <div class="field"><label for="loginPass">Passwort</label><input id="loginPass" type="password" autocomplete="current-password"></div>
+    <p id="loginMsg" class="form-msg" role="alert" aria-live="polite" hidden></p>
+    <button class="btn btn-primary btn-block" type="submit">Einloggen</button>
+    <button class="btn btn-ghost btn-block" type="button" data-act="auth-register">Neu hier? Registrieren</button>
+    <p class="tiny muted" id="loginHint"></p>
+  </form>
+
+  <form novalidate id="registerForm" class="auth-card card" autocomplete="off" hidden>
+    <div class="logo" aria-hidden="true">🧭</div>
+    <div>
+      <h1>Registrieren</h1>
+      <p class="muted" style="margin-top:6px">Lege Name und Passwort fest. Ein Admin muss dich danach freigeben.</p>
+    </div>
+    <div class="field"><label for="regName">Name</label><input id="regName" type="text" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="24"></div>
+    <div class="field"><label for="regPass">Passwort</label><input id="regPass" type="password" autocomplete="new-password"><span class="hint">Mindestens 6 Zeichen.</span></div>
+    <div class="field"><label for="regPass2">Passwort wiederholen</label><input id="regPass2" type="password" autocomplete="new-password"></div>
+    <p id="regMsg" class="form-msg" role="alert" aria-live="polite" hidden></p>
+    <button class="btn btn-primary btn-block" type="submit">Anfrage senden</button>
+    <button class="btn btn-ghost btn-block" type="button" data-act="auth-login">Zurück zum Login</button>
+  </form>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="app" class="app" hidden>
+  <aside class="rail" aria-label="Hauptnavigation">
+    <div class="brand"><div class="logo" aria-hidden="true">🌍</div><strong>Reiseplaner</strong></div>
+    <button class="nav-btn active" data-view="map"><svg class="i"><use href="#i-map"/></svg><span>Karte</span></button>
+    <button class="nav-btn" data-view="posts"><svg class="i"><use href="#i-chat"/></svg><span>Nachrichtenverlauf</span></button>
+    <button class="nav-btn" data-view="travel"><svg class="i"><use href="#i-book"/></svg><span>Reisen</span></button>
+    <button class="nav-btn" data-view="account"><svg class="i"><use href="#i-user"/></svg><span>Konto</span><i class="nav-badge" hidden></i></button>
+    <div class="rail-foot tiny muted">Angemeldet als <strong class="userName"></strong> · <span class="userRole"></span></div>
+  </aside>
+
+  <main class="main">
+    <!-- ---------- KARTE ---------- -->
+    <section id="view-map" class="view" data-view-id="map">
+      <header class="view-head">
+        <div class="grow">
+          <p class="eyebrow">Aktueller Ort</p>
+          <h1 id="locTitle">–</h1>
+          <p class="muted small num" id="locSub"></p>
         </div>
-        <button onclick="saveCompletedDrawnRoute()" style="width: 100%; padding: 12px; font-weight: bold;">Strecke speichern</button> 
-    </div> 
-</div> 
-
-<!-- NADEL DETAILS MODAL --> 
-<div id="pinDetailModal" class="modal"> 
-    <div class="modal-content" style="max-width: 550px;"> 
-        <span class="close-modal" onclick="closeModal('pinDetailModal')">&times;</span> 
-        <h3 id="pinModalStationTitle" style="margin-top:0; color: var(--accent-color);">Station bearbeiten</h3> 
-        <input type="hidden" id="activeEditingPinIndex"> 
-        <div class="auth-form-group"><label>Name der Station</label><input type="text" id="pinEditTitleInput"></div> 
-        <div style="display:flex; gap:8px;">
-            <div class="auth-form-group" style="flex:1;"><label>Datum</label><input type="date" id="pinEditDateInput"></div>
-            <div class="auth-form-group" style="flex:1;"><label>Uhrzeit</label><input type="time" id="pinEditTimeInput"></div>
+        <div class="row">
+          <button class="btn btn-ghost btn-icon" data-act="locate" aria-label="Meinen GPS-Standort verwenden" title="Mein Standort"><svg class="i"><use href="#i-locate"/></svg></button>
+          <button class="btn btn-soft" data-act="navigate"><svg class="i"><use href="#i-nav"/></svg>Route</button>
         </div>
-        <div class="auth-form-group"><label>Ausführliche Notizen & Text</label><textarea id="pinEditNoteInput" rows="4" placeholder="Schreibe deine Erlebnisse zu dieser Nadel..."></textarea></div> 
-        <div class="unified-media-toolbar"> 
-            <label class="media-btn media-btn-img" style="cursor:pointer;">📸 Bild <input type="file" accept="image/*" style="display:none;" onchange="handleFileUpload(event, 'pin')"></label> 
-            <label class="media-btn media-btn-vid" style="cursor:pointer;">🎥 Video <input type="file" accept="video/*" style="display:none;" onchange="handleFileUpload(event, 'pin')"></label> 
-            <button class="media-btn media-btn-gif" onclick="openGifPicker('pin')">🖼️ GIF</button> 
-            <button class="media-btn media-btn-loc" onclick="openLocationPicker('pin')">📍 Standort</button> 
-            <button class="media-btn media-btn-yt" onclick="openLinkPicker('pin', 'yt')">🎥 YouTube</button> 
-            <button class="media-btn media-btn-reddit" onclick="openLinkPicker('pin', 'reddit')">🔴 Reddit</button> 
-            <button class="media-btn media-btn-poll" onclick="openPollPicker('pin')">📊 Umfrage</button> 
-        </div> 
-        <div id="pinMediaAttachmentIndicator" style="font-size:0.8rem; color:#34d399; margin-bottom:6px;"></div> 
-        <button onclick="savePinDetailChanges()" style="width: 100%;">Station speichern</button> 
-    </div> 
-</div> 
+      </header>
 
-<!-- HAUPTCONTAINER --> 
-<div class="container" id="mainAppContainer" style="display: none;"> 
-    <div class="app-header-card"> 
-        <div class="app-header-top"> 
-            <h1 onclick="navigateToHomeView()">Reisen 🌍✈️</h1> 
-            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;"> 
-                <span class="badge" id="userBadgeLabel" onclick="navigateToConsoleView()">admin</span> 
-                <button class="logout-btn" onclick="handleLogout()">Abmelden</button> 
-            </div> 
-        </div> 
-    </div> 
+      <div class="map-layout">
+        <div class="stack">
+          <div class="suggest-host">
+            <form novalidate id="searchForm" class="search" role="search">
+              <svg class="i"><use href="#i-search"/></svg>
+              <input id="searchInput" type="search" placeholder="Ort, Adresse oder PLZ suchen …" aria-label="Ort suchen" enterkeyhint="search" autocomplete="off">
+              <button class="btn btn-primary" type="submit">Suchen</button>
+            </form>
+            <ul class="suggest" id="searchSuggest" hidden></ul>
+          </div>
 
-    <!-- 1. HAUPTSEITE VIEW --> 
-    <div id="homeViewContainer" style="display: flex; flex-direction: column; gap: 12px;"> 
-        <div class="card"> 
-            <h3>🗺️ Weltkarte & Radius-Suche</h3> 
-            <div class="search-box"> 
-                <input type="text" id="citySearch" placeholder="Ort suchen..." onkeydown="handleCitySearchKeyDown(event)"> 
-                <button onclick="searchLocation()">Suchen</button> 
-            </div> 
-            <div class="radius-control"> 
-                <label for="radiusRange">Such-Umkreis: <strong id="radiusValue">0.5</strong> km</label> 
-                <input type="range" id="radiusRange" min="0.5" max="50" step="0.5" value="0.5" oninput="handleRadiusInputChange(event)"> 
-            </div> 
-            <div id="map" class="map-container"> 
-                <div id="mainMapOverlay" class="map-loading-overlay"> 
-                    <span class="swivel-loader"></span> 
-                    <span>Lade POIs im Umkreis...</span> 
-                </div> 
-            </div> 
-            <div class="interactive-legend-card"> 
-                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;"> 
-                    <span style="font-weight: 600; font-size: 0.9rem;">🗺️ POI Kategorien</span> 
-                    <div style="display:flex; gap:6px;"> 
-                        <button onclick="openPoiListModal()" style="padding: 4px 10px; font-size: 0.75rem; background:#10b981;">📋 POI Liste</button> 
-                        <button onclick="manualRefreshPOIs()" style="padding: 4px 10px; font-size: 0.75rem;">🔄 Aktualisieren</button> 
-                    </div> 
-                </div> 
-                <div class="interactive-legend-grid"> 
-                    <div class="legend-item-box"><label><input type="checkbox" id="poi_parking" checked onchange="filterPOIsDisplay()"> <span class="legend-dot gray"></span> Parken</label><span id="count_parking" style="font-size:0.75rem; color:var(--text-muted);">(0)</span></div> 
-                    <div class="legend-item-box"><label><input type="checkbox" id="poi_shops" checked onchange="filterPOIsDisplay()"> <span class="legend-dot pink"></span> Geschäfte</label><span id="count_shops" style="font-size:0.75rem; color:var(--text-muted);">(0)</span></div> 
-                    <div class="legend-item-box"><label><input type="checkbox" id="poi_fuel" checked onchange="filterPOIsDisplay()"> <span class="legend-dot green"></span> Tankstellen</label><span id="count_fuel" style="font-size:0.75rem; color:var(--text-muted);">(0)</span></div> 
-                    <div class="legend-item-box"><label><input type="checkbox" id="poi_charging" checked onchange="filterPOIsDisplay()"> <span class="legend-dot teal"></span> E-Ladesäulen</label><span id="count_charging" style="font-size:0.75rem; color:var(--text-muted);">(0)</span></div> 
-                    <div class="legend-item-box"><label><input type="checkbox" id="poi_restaurants" checked onchange="filterPOIsDisplay()"> <span class="legend-dot blue"></span> Gastro</label><span id="count_restaurants" style="font-size:0.75rem; color:var(--text-muted);">(0)</span></div> 
-                    <div class="legend-item-box"><label><input type="checkbox" id="poi_pharmacy" checked onchange="filterPOIsDisplay()"> <span class="legend-dot purple"></span> Apotheken</label><span id="count_pharmacy" style="font-size:0.75rem; color:var(--text-muted);">(0)</span></div> 
-                    <div class="legend-item-box"><label><input type="checkbox" id="poi_sights" checked onchange="filterPOIsDisplay()"> <span class="legend-dot red"></span> Kultur</label><span id="count_sights" style="font-size:0.75rem; color:var(--text-muted);">(0)</span></div> 
-                    <div class="legend-item-box"><label><input type="checkbox" id="poi_hotels" checked onchange="filterPOIsDisplay()"> <span class="legend-dot orange"></span> Unterkünfte</label><span id="count_hotels" style="font-size:0.75rem; color:var(--text-muted);">(0)</span></div> 
-                    <div class="legend-item-box"><label><input type="checkbox" id="poi_banks" checked onchange="filterPOIsDisplay()"> <span class="legend-dot emerald"></span> Banken</label><span id="count_banks" style="font-size:0.75rem; color:var(--text-muted);">(0)</span></div> 
-                </div> 
-            </div> 
-            <div style="margin-top: 10px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;"> 
-                <button onclick="setMyCurrentLocation()" style="background: #ef4444; flex: 1;">📍 Aktueller Standort</button> 
-                <button onclick="openGoogleMapsNavigation()" style="background: #10b981; flex: 1;">🧭 Google Maps Navigation</button> 
-            </div> 
-        </div> 
+          <div class="card">
+            <div class="row between" style="margin-bottom:6px">
+              <label for="radiusRange" class="label">Such-Umkreis</label>
+              <strong class="num"><span id="radiusValue">0.5</span> km</strong>
+            </div>
+            <input type="range" id="radiusRange" min="0.5" max="50" step="0.5" value="0.5">
+          </div>
 
-        <div class="card" id="weatherCard" onclick="openWeatherDetailsModal()" style="cursor: pointer;"> 
-            <h3>🌤️ Wetter-Vorschau <small style="font-size:0.75rem; color:var(--accent-color);">(Zukünftige Stunden & Graphen)</small></h3> 
-            <div class="weather-grid" id="weatherGrid"> 
-                <div style="text-align:center; padding:15px; grid-column:1/-1; color:var(--text-muted);"><span class="swivel-loader"></span> Lade Wetter...</div> 
-            </div> 
-            <h3 style="margin-top: 15px;">⏱️ Stündlich (Zukunft)</h3> 
-            <div class="weather-hours" id="weatherHoursGrid"></div> 
-            <p style="font-size: 0.8rem; color: #4ade80; margin-top: 8px; margin-bottom: 0;">⚡ Aktiv für: <span id="weatherCityName">Standort</span></p> 
-        </div> 
+          <div class="map-wrap">
+            <div id="map" class="map" role="application" aria-label="Karte"></div>
+            <div id="mapOverlay" class="map-overlay" hidden><span class="spinner"></span><span id="mapOverlayText">Lade Orte …</span></div>
+          </div>
 
-        <div class="card"> 
-            <h3>ℹ️ Stadt-Infos & Wikipedia</h3> 
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin-top: 8px; font-size: 0.9rem;"> 
-                <div><strong>Stadt:</strong> <span id="infoCity">-</span></div> 
-                <div><strong>PLZ:</strong> <span id="infoPostalCode" style="color:#34d399;">-</span></div> 
-                <div><strong>Region:</strong> <span id="infoCountryState">-</span></div> 
-            </div> 
-            <div style="margin-top:8px; font-size:0.85rem; color:var(--text-muted);" id="cityLocationDesc">Lade Wikipedia...</div> 
-        </div> 
+          <div class="card">
+            <div class="row between wrap">
+              <h3>In der Nähe <span class="muted small" id="poiTotal"></span></h3>
+              <button class="btn btn-soft btn-sm" data-act="poi-list"><svg class="i"><use href="#i-list"/></svg>Liste öffnen</button>
+            </div>
+            <div id="poiStatus" class="poi-status" hidden></div>
+            <div id="poiChips" class="poi-groups"></div>
+          </div>
+        </div>
 
-        <div class="card"> 
-            <h3>💬 Community Feed</h3> 
-            <div id="postsFeedContainer" style="display: flex; flex-direction: column; gap: 10px; margin-top: 10px;"></div> 
-        </div> 
+        <div class="stack">
+          <article class="card">
+            <div class="row between"><h3>Wetter</h3><span class="tiny muted" id="wxPlace"></span></div>
+            <div id="wxNow" class="skeleton" style="min-height:92px"></div>
+            <div id="wxHours" class="wx-hours"></div>
+            <div id="wxDays" class="wx-days"></div>
+          </article>
+          <article class="card">
+            <h3>Wind</h3>
+            <div id="windBox" class="skeleton" style="min-height:84px"></div>
+          </article>
+          <article class="card">
+            <h3 id="cityTitle">Über den Ort</h3>
+            <p id="cityDesc" class="muted small" style="margin-top:10px"></p>
+            <a id="cityLink" class="small" href="#" target="_blank" rel="noopener noreferrer" hidden style="display:inline-block;margin-top:8px">Mehr auf Wikipedia →</a>
+          </article>
+        </div>
+      </div>
+    </section>
 
-        <div class="card"> 
-            <h3>✍️ Neue Nachricht</h3> 
-            <textarea id="postText" placeholder="Was gibt's Neues bei deinen Reisen?..." rows="3"></textarea> 
-            <div class="unified-media-toolbar"> 
-                <label class="media-btn media-btn-img" style="cursor:pointer;">📸 Bild <input type="file" accept="image/*" style="display:none;" onchange="handleFileUpload(event, 'post')"></label> 
-                <label class="media-btn media-btn-vid" style="cursor:pointer;">🎥 Video <input type="file" accept="video/*" style="display:none;" onchange="handleFileUpload(event, 'post')"></label> 
-                <button class="media-btn media-btn-gif" onclick="openGifPicker('post')">🖼️ GIF</button> 
-                <button class="media-btn media-btn-loc" onclick="openLocationPicker('post')">📍 Standort</button> 
-                <button class="media-btn media-btn-yt" onclick="openLinkPicker('post', 'yt')">🎥 YouTube</button> 
-                <button class="media-btn media-btn-reddit" onclick="openLinkPicker('post', 'reddit')">🔴 Reddit</button> 
-                <button class="media-btn media-btn-poll" onclick="openPollPicker('post')">📊 Umfrage</button> 
-            </div> 
-            <div id="postMediaAttachmentIndicator" style="font-size:0.8rem; color:#34d399; margin-bottom:4px;"></div> 
-            <button onclick="handleCreatePost()" style="width: 100%; margin-top: 4px;">Beitrag veröffentlichen</button> 
-        </div> 
-    </div> 
+    <!-- ---------- NACHRICHTENVERLAUF ---------- -->
+    <section id="view-posts" class="view" data-view-id="posts" hidden>
+      <header class="view-head"><div><p class="eyebrow">Austausch</p><h1>Nachrichtenverlauf</h1></div></header>
+      <div class="stack" style="max-width:760px">
+        <div class="card composer">
+          <h3>Neue Nachricht</h3>
+          <textarea id="postText" placeholder="Was gibt es Neues von unterwegs?" aria-label="Nachricht"></textarea>
+          <div id="postToolbar" style="margin-top:10px"></div>
+          <div id="draft-post" class="draft"></div>
+          <button class="btn btn-primary btn-block" style="margin-top:12px" data-act="post-save"><svg class="i"><use href="#i-send"/></svg>Veröffentlichen</button>
+        </div>
+        <div id="postFeed" class="stack"></div>
+      </div>
+    </section>
 
-    <!-- 2. TAGEBUCH VIEW --> 
-    <div id="timelineViewContainer" style="display: none; flex-direction: column; gap: 12px;"> 
-        <div class="card"> 
-            <h3 style="margin-top:0; color: var(--accent-color);">✈️ Reiseverlauf & Tagebuch</h3> 
-            
-            <!-- Zeitstrahl / Datumsfilter --> 
-            <div style="display:flex; gap:8px; margin-bottom:10px;"> 
-                <input type="date" id="timelineFilterStartDate" onchange="renderTimelineOnMap()" style="padding:6px; font-size:0.8rem;"> 
-                <input type="date" id="timelineFilterEndDate" onchange="renderTimelineOnMap()" style="padding:6px; font-size:0.8rem;"> 
-            </div> 
+    <!-- ---------- REISEN ---------- -->
+    <section id="view-travel" class="view" data-view-id="travel" hidden>
+      <header class="view-head">
+        <div><p class="eyebrow">Reise-Chronik</p><h1>Meine Reisen</h1></div>
+        <div class="row wrap">
+          <button class="btn btn-soft" data-act="entry-new"><svg class="i"><use href="#i-plus"/></svg>Eintrag</button>
+          <button class="btn btn-primary" data-act="route-new"><svg class="i"><use href="#i-route"/></svg>Strecke zeichnen</button>
+        </div>
+      </header>
+      <div class="stack">
+        <div class="card">
+          <div class="row between wrap" style="margin-bottom:12px"><h3>Statistik</h3><div id="yearChips" class="chips"></div></div>
+          <div id="distStats" class="stats"></div>
+          <div id="moveChips" class="chips" style="margin-top:14px"></div>
+        </div>
+        <div class="map-wrap"><div id="timelineMap" class="map tall" role="application" aria-label="Reisekarte"></div></div>
+        <div id="chronicle" class="log"></div>
+      </div>
+    </section>
 
-            <div id="timelineMap" class="map-container" style="height: 320px; margin-bottom: 10px;"></div> 
-            
-            <!-- Filter & Gesamtdistanzen --> 
-            <div class="interactive-legend-card" style="margin-bottom:12px;"> 
-                <div style="font-weight: 600; font-size: 0.9rem; margin-bottom: 6px;">🚲 Gesamtdistanzen & Transportmittel-Filter:</div> 
-                <div id="distanceStatsSummary" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap:6px; font-size:0.8rem;"></div> 
-            </div> 
-            
-            <button onclick="openRouteDrawingModal()" style="width:100%; margin-bottom:12px; font-weight:bold;">✍️ Streckenplaner öffnen</button> 
-            
-            <!-- EINZELNE TAGEBUCHEINTRÄGE HINZUFÜGEN --> 
-            <div style="background: #162032; padding: 12px; border-radius: 10px; border: 1px solid var(--border-color);"> 
-                <h4 style="margin-top: 0; color: var(--accent-color);">➕ Tagebucheintrag hinzufügen</h4> 
-                <div class="auth-form-group"> 
-                    <label style="color:#fca5a5;">📍 Zwingende Standort-Adresse</label> 
-                    <div style="display:flex; gap:6px; margin-bottom:6px;"> 
-                        <input type="text" id="travelAddressInput" placeholder="Adresse eingeben (z.B. Paris Eiffel)..."> 
-                        <button onclick="geocodeTravelEntryAddress()" style="padding:6px 10px; font-size:0.8rem; white-space:nowrap;">🔍 Suchen</button> 
-                    </div> 
-                    <button onclick="useGPSForTravelEntry()" style="width:100%; background:#ef4444; padding:6px; font-size:0.8rem;">📍 Aktuellen Standort benutzen</button> 
-                </div> 
-                <div class="auth-form-group"><label>Titel der Station</label><input type="text" id="travelTitleInput" placeholder="Titel eingeben..."></div> 
-                <div style="display:flex; gap:8px;">
-                    <div class="auth-form-group" style="flex:1;"><label>Datum</label><input type="date" id="travelDateInput"></div>
-                    <div class="auth-form-group" style="flex:1;"><label>Uhrzeit</label><input type="time" id="travelTimeInput"></div>
-                </div>
-                <div class="auth-form-group"><label>Erlebnisse / Notizen</label><textarea id="travelDescInput" rows="3" placeholder="Deine Erlebnisse..."></textarea></div> 
-                <div class="unified-media-toolbar"> 
-                    <label class="media-btn media-btn-img" style="cursor:pointer;">📸 Bild <input type="file" accept="image/*" style="display:none;" onchange="handleFileUpload(event, 'travel')"></label> 
-                    <label class="media-btn media-btn-vid" style="cursor:pointer;">🎥 Video <input type="file" accept="video/*" style="display:none;" onchange="handleFileUpload(event, 'travel')"></label> 
-                    <button class="media-btn media-btn-gif" onclick="openGifPicker('travel')">🖼️ GIF</button> 
-                    <button class="media-btn media-btn-loc" onclick="openLocationPicker('travel')">📍 Standort</button> 
-                    <button class="media-btn media-btn-yt" onclick="openLinkPicker('travel', 'yt')">🎥 YouTube</button> 
-                    <button class="media-btn media-btn-reddit" onclick="openLinkPicker('travel', 'reddit')">🔴 Reddit</button> 
-                    <button class="media-btn media-btn-poll" onclick="openPollPicker('travel')">📊 Umfrage</button> 
-                </div> 
-                <div id="travelMediaAttachmentIndicator" style="font-size:0.8rem; color:#34d399; margin-bottom:6px;"></div> 
-                <button onclick="saveTravelEntry()" style="width: 100%;">Reise-Eintrag speichern</button> 
-            </div> 
-        </div> 
-        
-        <div class="card"> 
-            <h3>📚 Reise-Chronik & Routen-Details</h3> 
-            <div style="margin-bottom:10px; font-size:0.85rem; color:var(--text-muted);"> 
-                <span>Filter nach Jahr:</span> 
-                <div id="chronicleYearFilterContainer" style="display:flex; gap:6px; overflow-x:auto; margin-top:4px; padding-bottom:4px;"></div> 
-            </div> 
-            <div id="travelEntriesList" style="display: flex; flex-direction: column; gap: 10px; margin-top: 10px;"></div> 
-        </div> 
-    </div> 
+    <!-- ---------- KONTO ---------- -->
+    <section id="view-account" class="view" data-view-id="account" hidden>
+      <header class="view-head"><div><p class="eyebrow">Einstellungen</p><h1>Konto &amp; Daten</h1></div></header>
+      <div class="stack" style="max-width:720px">
+        <div class="card">
+          <div class="kv"><span>Angemeldet als</span><strong class="userName"></strong></div>
+          <div class="kv"><span>Rolle</span><strong class="userRole"></strong></div>
+          <div class="kv"><span>Mitglied seit</span><span class="muted small" id="accSince">–</span></div>
+          <div class="kv"><span>Design</span>
+            <div class="seg" id="themeSeg" role="group" aria-label="Design">
+              <button data-theme-set="auto" aria-pressed="true">Auto</button>
+              <button data-theme-set="light" aria-pressed="false">Hell</button>
+              <button data-theme-set="dark" aria-pressed="false">Dunkel</button>
+            </div>
+          </div>
+          <div class="kv"><span>Gespeicherte Daten</span><span class="muted small" id="dataSummary">–</span></div>
+          <div class="row wrap" style="margin-top:14px">
+            <button class="btn btn-soft" data-act="pw-open"><svg class="i"><use href="#i-key"/></svg>Passwort ändern</button>
+            <button class="btn btn-ghost" data-act="logout"><svg class="i"><use href="#i-logout"/></svg>Abmelden</button>
+          </div>
+        </div>
+        <p id="pwWarn" class="form-msg warn" hidden>Du nutzt noch das Standardpasswort „admin“. Bitte ändere es über „Passwort ändern“.</p>
 
-    <!-- 3. KONTO VIEW --> 
-    <div id="consoleViewContainer" style="display: none; flex-direction: column; gap: 12px;"> 
-        <div class="card"> 
-            <h3 style="margin-top:0; color: var(--accent-color);">⚙️ Admin & Cloud-Backend</h3> 
-            <div style="background:#0f172a; padding:12px; border-radius:10px; border:1px solid var(--border-color); margin-bottom:12px;"> 
-                <div style="margin-bottom:8px;">Aktueller Cloud-Speicher: <span id="currentCloudProviderLabel" style="color:#34d399; font-weight:bold;">Nextcloud (WebDAV)</span></div> 
-                <div class="auth-form-group" style="margin-top:10px;">
-                    <label>☁️ Cloud-Anbieter wählen:</label>
-                    <select id="cloudProviderSelect" onchange="updateCloudProviderSetting()">
-                        <option value="nextcloud">Nextcloud (WebDAV)</option>
-                        <option value="onedrive">Microsoft OneDrive</option>
-                        <option value="googlecloud">Google Cloud Storage</option>
-                    </select>
-                </div>
-                <div class="auth-form-group">
-                    <label>Server-URL / Endpoint:</label>
-                    <input type="text" id="cloudEndpointInput" placeholder="https://cloud.meinserver.de/remote.php/dav/files/admin/">
-                </div>
-                <div class="auth-form-group">
-                    <label>API-Token / Passwort:</label>
-                    <input type="password" id="cloudTokenInput" placeholder="Sicherheits-Token...">
-                </div>
-                <button onclick="saveCloudSettings()" style="width:100%; margin-top:6px;">Cloud-Verbindung speichern & synchronisieren</button>
-            </div> 
-            <button onclick="deleteMyAccount()" style="width:100%; background: #ef4444;">Account zurücksetzen</button> 
-        </div> 
-    </div> 
-</div> 
+        <div data-admin-only hidden class="stack">
+          <p class="section-title">Mitglieder</p>
+          <div class="card stack">
+            <div class="row" style="gap:8px"><h3>Neue Anfragen</h3><span class="count-pill" id="pendingCount" hidden></span></div>
+            <div id="pendingList" class="stack" style="gap:8px"></div>
+          </div>
+          <div class="card stack">
+            <h3>Mitgliederliste</h3>
+            <div id="memberList" class="stack" style="gap:10px"></div>
+            <p class="tiny muted">Konten gelten nur in diesem Browser. Admins können Rollen vergeben, Mitglieder entfernen und Passwörter zurücksetzen.</p>
+          </div>
 
-<!-- WETTER DETAILS MODAL MIT 3 GRAPHEN --> 
-<div id="weatherDetailsModal" class="modal"> 
-    <div class="modal-content" style="max-width: 650px;"> 
-        <span class="close-modal" onclick="closeModal('weatherDetailsModal')">&times;</span> 
-        <h2 style="margin-top:0; color: var(--accent-color);">🌤️ Umfassende Wetter-Analyse</h2> 
-        <div style="display:flex; gap:8px; margin-bottom:12px;"> 
-            <button id="btnWeatherHourly" onclick="switchWeatherTab('hourly')" style="flex:1; background:var(--accent-color);">Stündlich (24h)</button> 
-            <button id="btnWeatherWeekly" onclick="switchWeatherTab('weekly')" style="flex:1; background:#334155;">Täglich (7 Tage)</button> 
-        </div> 
-        <div style="background: #0f172a; padding: 12px; border-radius: 10px; margin-bottom:14px;"> 
-            <h4 style="margin: 0 0 6px 0; font-size: 0.9rem; color: #3b82f6;">🌡️ Temperaturverlauf (°C)</h4> 
-            <div style="position: relative; height: 130px; width: 100%;"><canvas id="tempChart"></canvas></div> 
-        </div> 
-        <div style="background: #0f172a; padding: 12px; border-radius: 10px; margin-bottom:14px;"> 
-            <h4 style="margin: 0 0 6px 0; font-size: 0.9rem; color: #06b6d4;">🌧️ Niederschlag (mm)</h4> 
-            <div style="position: relative; height: 130px; width: 100%;"><canvas id="rainChart"></canvas></div> 
-        </div> 
-        <div style="background: #0f172a; padding: 12px; border-radius: 10px;"> 
-            <h4 style="margin: 0 0 6px 0; font-size: 0.9rem; color: #10b981;">💨 Windgeschwindigkeit (km/h)</h4> 
-            <div style="position: relative; height: 130px; width: 100%;"><canvas id="windChart"></canvas></div> 
-        </div> 
-    </div> 
-</div> 
+          <p class="section-title">Cloud-Sicherung</p>
+          <div class="card stack">
+            <div class="row between"><span class="muted small">Aktueller Speicher</span><strong id="currentCloudProviderLabel" class="small">Nextcloud (WebDAV)</strong></div>
+            <div class="field"><label for="cloudProviderSelect">Anbieter</label>
+              <select id="cloudProviderSelect">
+                <option value="nextcloud">Nextcloud (WebDAV)</option>
+                <option value="onedrive">Microsoft OneDrive</option>
+                <option value="googlecloud">Google Cloud Storage</option>
+              </select>
+            </div>
+            <div class="field"><label for="cloudEndpointInput" id="cloudEndpointLabel">Server-URL (WebDAV-Ordner)</label>
+              <input type="text" id="cloudEndpointInput" placeholder="https://cloud.beispiel.de/remote.php/dav/files/name/Reisen/" autocomplete="off" spellcheck="false"></div>
+            <div class="field" id="cloudUserField"><label for="cloudUserInput">Benutzername</label>
+              <input type="text" id="cloudUserInput" autocomplete="off" spellcheck="false"></div>
+            <div class="field"><label for="cloudTokenInput" id="cloudTokenLabel">App-Passwort</label>
+              <input type="password" id="cloudTokenInput" autocomplete="off" placeholder="Token / Passwort …"></div>
+            <p class="hint" id="cloudHint"></p>
+            <div class="row wrap">
+              <button class="btn btn-soft" data-act="cloud-save">Speichern</button>
+              <button class="btn btn-primary" data-act="cloud-up"><svg class="i"><use href="#i-upload"/></svg>Hochladen</button>
+              <button class="btn btn-ghost" data-act="cloud-down"><svg class="i"><use href="#i-download"/></svg>Wiederherstellen</button>
+            </div>
+            <p class="tiny muted">Zugangsdaten werden nur lokal in diesem Browser gespeichert. Videos sind nicht Teil der Cloud-Sicherung.</p>
+          </div>
 
-<!-- BOTTOM NAVIGATION --> 
-<div class="bottom-nav"> 
-    <div class="nav-item active" id="navItemHome" onclick="navigateToHomeView()"><span class="nav-item-icon">🗺️</span><span>Karte</span></div> 
-    <div class="nav-item" id="navItemTimeline" onclick="navigateToTimelineView()"><span class="nav-item-icon">✈️</span><span>Tagebuch</span></div> 
-    <div class="nav-item" id="navItemConsole" onclick="navigateToConsoleView()"><span class="nav-item-icon">⚙️</span><span>Konto</span></div> 
-</div> 
+          <p class="section-title">Datei-Sicherung</p>
+          <div class="card stack">
+            <p class="small muted">Exportiert Mitglieder, Beiträge, Tagebuch, Strecken und alle Bilder und Videos in eine Datei, die du später wieder importieren kannst.</p>
+            <div class="row wrap">
+              <button class="btn btn-soft" data-act="export"><svg class="i"><use href="#i-download"/></svg>Exportieren</button>
+              <label class="btn btn-ghost" style="cursor:pointer"><svg class="i"><use href="#i-upload"/></svg>Importieren<input type="file" id="importFile" accept="application/json,.json" hidden></label>
+            </div>
+          </div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script> 
-<script> 
-const manifestData = { name: "Reisen", short_name: "Reisen", start_url: ".", display: "standalone", background_color: "#0f172a", theme_color: "#0f172a", icons: [] }; 
-const blob = new Blob([JSON.stringify(manifestData)], {type: 'application/json'}); 
-document.getElementById('manifestPlaceholder').setAttribute('href', URL.createObjectURL(blob)); 
+          <p class="section-title">Verbindungstest</p>
+          <div class="card stack">
+            <p class="small muted">Prüft, ob Speicher, Kartenkacheln, Ortssuche, Orte-Server, Wetter und Wikipedia in dieser Umgebung erreichbar sind.</p>
+            <div><button class="btn btn-soft" data-act="diag-run" id="diagBtn">Test starten</button></div>
+            <div id="diagResult" class="diag" hidden></div>
+          </div>
 
-function triggerHaptic() { if ("vibrate" in navigator) navigator.vibrate(15); } 
-function showToast(message) { 
-    triggerHaptic(); 
-    const container = document.getElementById('toastContainer'); 
-    const toast = document.createElement('div'); 
-    toast.className = 'toast'; toast.innerText = message; 
-    container.appendChild(toast); 
-    setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 2500); 
-} 
+          <p class="section-title">Zurücksetzen</p>
+          <div class="card row wrap">
+            <button class="btn btn-danger" data-act="reset"><svg class="i"><use href="#i-trash"/></svg>Alle Daten zurücksetzen</button>
+            <span class="tiny muted grow" style="flex-basis:200px">Löscht Beiträge, Tagebuch, Strecken, Medien und Cloud-Einstellungen. Mitglieder bleiben.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
 
-const emojiMap = [
-    { char: '😀', k: 'lachen smile' }, { char: '😂', k: 'tränen tears' },
-    { char: '😍', k: 'herz love' }, { char: '👍', k: 'daumen like' },
-    { char: '✈️', k: 'flugzeug plane' }, { char: '🌍', k: 'welt earth' },
-    { char: '🍕', k: 'pizza food' }, { char: '🎉', k: 'party' },
-    { char: '🏖️', k: 'strand beach' }, { char: '🏔️', k: 'berge mountain' },
-    { char: '🚗', k: 'auto car' }, { char: '🚆', k: 'zug train' },
-    { char: '🏨', k: 'hotel' }, { char: '🍻', k: 'bier beer' }
-];
-const standardEmojis = ["😁","😆","😅","🤣","😊","😇","🙂","😉","😍","😘","😋","😎","🥳","👍","👎","❤️","✈️","🌍","🏖️","🏔️","📸","🚗","🚆","🏨","🍕","🍻","🎉","🌟","🔥","💡","🎯","🚀","⚓","🧭","🗺️","⛺","🎒","🕶️","☀️","⛈️"];
-const emojiList = emojiMap.map(e => e.char).concat(standardEmojis);
-let filteredEmojiList = [...emojiList];
-let currentEmojiPage = 0;
-const EMOJIS_PER_PAGE = 36;
+  <nav class="tabbar" aria-label="Hauptnavigation">
+    <button class="nav-btn active" data-view="map"><svg class="i"><use href="#i-map"/></svg><span>Karte</span></button>
+    <button class="nav-btn" data-view="posts"><svg class="i"><use href="#i-chat"/></svg><span>Nachrichtenverlauf</span></button>
+    <button class="nav-btn" data-view="travel"><svg class="i"><use href="#i-book"/></svg><span>Reisen</span></button>
+    <button class="nav-btn" data-view="account"><svg class="i"><use href="#i-user"/></svg><span>Konto</span><i class="nav-badge" hidden></i></button>
+  </nav>
+</div>
 
-function renderEmojiGrid() {
-    const container = document.getElementById('emojiGridContainer');
-    if (!container) return;
-    const start = currentEmojiPage * EMOJIS_PER_PAGE;
-    const pageEmojis = filteredEmojiList.slice(start, start + EMOJIS_PER_PAGE);
-    container.innerHTML = pageEmojis.map(e => `<div class="emoji-grid-cell" onclick="addReaction('${e}')">${e}</div>`).join('');
-    const totalPages = Math.ceil(filteredEmojiList.length / EMOJIS_PER_PAGE) || 1;
-    document.getElementById('emojiPageIndicator').innerText = `Seite ${currentEmojiPage + 1} / ${totalPages}`;
-}
-function prevEmojiPage() { if (currentEmojiPage > 0) { currentEmojiPage--; renderEmojiGrid(); } }
-function nextEmojiPage() { if ((currentEmojiPage + 1) * EMOJIS_PER_PAGE < filteredEmojiList.length) { currentEmojiPage++; renderEmojiGrid(); } }
-function handleEmojiSearchInput() {
-    const q = document.getElementById('emojiSearchInput').value.toLowerCase();
-    filteredEmojiList = q ? emojiMap.filter(e => e.k.includes(q)).map(e => e.char) : [...emojiList];
-    currentEmojiPage = 0; renderEmojiGrid();
-}
+<!-- ============ DIALOGE ============ -->
+<div class="modal" id="startModal" role="dialog" aria-modal="true" aria-labelledby="startModal-t" aria-hidden="true">
+  <div class="sheet"><div class="grab"></div>
+    <header class="sheet-head"><h2 id="startModal-t">📍 Wohin soll es gehen?</h2><button class="btn btn-ghost btn-icon btn-sm" data-close="startModal" aria-label="Schließen"><svg class="i"><use href="#i-x"/></svg></button></header>
+    <form novalidate id="startForm" class="stack">
+      <div class="field"><label for="startAddrInput">Welche Adresse möchtest du sehen?</label><input type="text" id="startAddrInput" placeholder="Ort, Adresse oder PLZ …" autocomplete="off"></div>
+      <ul class="suggest inline" id="startSuggest" hidden></ul>
+      <button class="btn btn-primary btn-block" type="submit">Suchen</button>
+      <button class="btn btn-soft btn-block" type="button" data-act="start-gps"><svg class="i"><use href="#i-locate"/></svg>Aktuellen GPS-Standort verwenden</button>
+      <button class="btn btn-ghost btn-block" type="button" id="startLastBtn" data-act="start-last" hidden></button>
+    </form>
+  </div>
+</div>
 
-let currentMediaAttachmentTarget = null;
-let tempActiveAttachment = null;
-let baseModalZIndex = 2000;
+<div class="modal" id="pwModal" role="dialog" aria-modal="true" aria-labelledby="pwModal-t" aria-hidden="true">
+  <div class="sheet"><div class="grab"></div>
+    <header class="sheet-head"><h2 id="pwModal-t">Passwort ändern</h2><button class="btn btn-ghost btn-icon btn-sm" data-close="pwModal" aria-label="Schließen"><svg class="i"><use href="#i-x"/></svg></button></header>
+    <form novalidate id="pwForm" class="stack">
+      <div class="field"><label for="pwOld">Altes Passwort</label><input type="password" id="pwOld" autocomplete="current-password"></div>
+      <div class="field"><label for="pwNew">Neues Passwort</label><input type="password" id="pwNew" autocomplete="new-password"><span class="hint">Mindestens 6 Zeichen.</span></div>
+      <div class="field"><label for="pwNew2">Neues Passwort wiederholen</label><input type="password" id="pwNew2" autocomplete="new-password"></div>
+      <label class="check"><input type="checkbox" id="pwShow"> Passwörter anzeigen</label>
+      <p id="pwMsg" class="form-msg" role="alert" aria-live="polite" hidden></p>
+      <button class="btn btn-primary btn-block" type="submit">Passwort speichern</button>
+    </form>
+  </div>
+</div>
 
-function showModal(id) { 
-    baseModalZIndex += 10;
-    const m = document.getElementById(id);
-    m.style.zIndex = baseModalZIndex;
-    m.style.display = 'flex'; 
-} 
-function closeModal(id) { document.getElementById(id).style.display = 'none'; } 
+<div class="modal" id="resetPwModal" role="dialog" aria-modal="true" aria-labelledby="resetPwModal-t" aria-hidden="true">
+  <div class="sheet"><div class="grab"></div>
+    <header class="sheet-head"><h2 id="resetPwModal-t">Passwort zurücksetzen</h2><button class="btn btn-ghost btn-icon btn-sm" data-close="resetPwModal" aria-label="Schließen"><svg class="i"><use href="#i-x"/></svg></button></header>
+    <form novalidate id="resetPwForm" class="stack">
+      <p class="muted small">Neues Passwort für <strong id="resetPwWho"></strong>. Das aktuelle Passwort ist nicht einsehbar.</p>
+      <div class="field"><label for="resetPwNew">Neues Passwort</label><input type="password" id="resetPwNew" autocomplete="new-password"><span class="hint">Mindestens 6 Zeichen.</span></div>
+      <label class="check"><input type="checkbox" id="resetPwShow"> Passwort anzeigen</label>
+      <p id="resetPwMsg" class="form-msg" role="alert" aria-live="polite" hidden></p>
+      <button class="btn btn-primary btn-block" type="submit">Neues Passwort speichern</button>
+    </form>
+  </div>
+</div>
 
-function handleLogin() { 
-    const u = document.getElementById('loginUser').value.trim();
-    const p = document.getElementById('loginPass').value.trim();
-    if (u === 'admin' && p === 'admin') {
-        completeLogin('admin');
-    } else {
-        showToast("Falscher Benutzername oder Passwort! (Nutze admin / admin)");
+<div class="modal" id="poiModal" role="dialog" aria-modal="true" aria-labelledby="poiModal-t" aria-hidden="true">
+  <div class="sheet wide"><div class="grab"></div>
+    <header class="sheet-head"><h2 id="poiModal-t">Orte im Umkreis</h2><button class="btn btn-ghost btn-icon btn-sm" data-close="poiModal" aria-label="Schließen"><svg class="i"><use href="#i-x"/></svg></button></header>
+    <div class="stack">
+      <div class="search"><svg class="i"><use href="#i-search"/></svg><input type="search" id="poiSearchInput" placeholder="Nach Namen filtern …" aria-label="Orte filtern"></div>
+      <div id="poiTabs" class="chips"></div>
+      <div id="poiList" class="poi-list"></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="gifModal" role="dialog" aria-modal="true" aria-labelledby="gifModal-t" aria-hidden="true">
+  <div class="sheet wide"><div class="grab"></div>
+    <header class="sheet-head"><h2 id="gifModal-t">GIF wählen</h2><button class="btn btn-ghost btn-icon btn-sm" data-close="gifModal" aria-label="Schließen"><svg class="i"><use href="#i-x"/></svg></button></header>
+    <div class="stack">
+      <form novalidate id="gifUrlForm" class="search" style="gap:8px">
+        <input type="text" inputmode="url" autocapitalize="off" spellcheck="false" id="gifUrlInput" placeholder="Eigene GIF-Adresse einfügen (https://…)" aria-label="GIF-Adresse" style="padding-left:14px">
+        <button class="btn btn-soft" type="submit">Einfügen</button>
+      </form>
+      <div id="gifGrid" class="gif-grid"></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="placeModal" role="dialog" aria-modal="true" aria-labelledby="placeModal-t" aria-hidden="true">
+  <div class="sheet"><div class="grab"></div>
+    <header class="sheet-head"><h2 id="placeModal-t">📍 Standort anhängen</h2><button class="btn btn-ghost btn-icon btn-sm" data-close="placeModal" aria-label="Schließen"><svg class="i"><use href="#i-x"/></svg></button></header>
+    <form novalidate id="placeForm" class="stack">
+      <div class="field"><label for="placeAddrInput">Adresse oder Ort</label><input type="text" id="placeAddrInput" placeholder="z. B. Eiffelturm, Paris" autocomplete="off"></div>
+      <ul class="suggest inline" id="placeSuggest" hidden></ul>
+      <button class="btn btn-primary btn-block" type="submit">Adresse übernehmen</button>
+      <button class="btn btn-soft btn-block" type="button" data-act="place-gps"><svg class="i"><use href="#i-locate"/></svg>Aktuellen GPS-Standort nutzen</button>
+    </form>
+  </div>
+</div>
+
+<div class="modal" id="linkModal" role="dialog" aria-modal="true" aria-labelledby="linkModalTitle" aria-hidden="true">
+  <div class="sheet"><div class="grab"></div>
+    <header class="sheet-head"><h2 id="linkModalTitle">YouTube-Video oder Link</h2><button class="btn btn-ghost btn-icon btn-sm" data-close="linkModal" aria-label="Schließen"><svg class="i"><use href="#i-x"/></svg></button></header>
+    <form novalidate id="linkForm" class="stack">
+      <div class="field"><label for="linkUrlInput" id="linkModalLabel">URL</label><input type="text" inputmode="url" autocapitalize="off" spellcheck="false" id="linkUrlInput" placeholder="https://…" autocomplete="off"></div>
+      <button class="btn btn-primary btn-block" type="submit">Link &amp; Vorschau hinzufügen</button>
+    </form>
+  </div>
+</div>
+
+<div class="modal" id="pollModal" role="dialog" aria-modal="true" aria-labelledby="pollModal-t" aria-hidden="true">
+  <div class="sheet"><div class="grab"></div>
+    <header class="sheet-head"><h2 id="pollModal-t">📊 Umfrage erstellen</h2><button class="btn btn-ghost btn-icon btn-sm" data-close="pollModal" aria-label="Schließen"><svg class="i"><use href="#i-x"/></svg></button></header>
+    <form novalidate id="pollForm" class="stack">
+      <div class="field"><label for="pollQuestionInput">Frage</label><input type="text" id="pollQuestionInput" placeholder="Wohin als Nächstes?" maxlength="140"></div>
+      <div class="field"><label for="pollOpt1">Option 1</label><input type="text" id="pollOpt1" maxlength="60"></div>
+      <div class="field"><label for="pollOpt2">Option 2</label><input type="text" id="pollOpt2" maxlength="60"></div>
+      <div class="field"><label for="pollOpt3">Option 3 (optional)</label><input type="text" id="pollOpt3" maxlength="60"></div>
+      <div class="field"><label for="pollOpt4">Option 4 (optional)</label><input type="text" id="pollOpt4" maxlength="60"></div>
+      <button class="btn btn-primary btn-block" type="submit">Umfrage anhängen</button>
+    </form>
+  </div>
+</div>
+
+<div class="modal" id="emojiModal" role="dialog" aria-modal="true" aria-labelledby="emojiModal-t" aria-hidden="true">
+  <div class="sheet"><div class="grab"></div>
+    <header class="sheet-head"><h2 id="emojiModal-t">😀 Emoji auswählen</h2><button class="btn btn-ghost btn-icon btn-sm" data-close="emojiModal" aria-label="Schließen"><svg class="i"><use href="#i-x"/></svg></button></header>
+    <div id="emojiGrid" class="emoji-grid"></div>
+  </div>
+</div>
+
+<div class="modal" id="replyModal" role="dialog" aria-modal="true" aria-labelledby="replyModal-t" aria-hidden="true">
+  <div class="sheet"><div class="grab"></div>
+    <header class="sheet-head"><h2 id="replyModal-t">💬 Auf Beitrag antworten</h2><button class="btn btn-ghost btn-icon btn-sm" data-close="replyModal" aria-label="Schließen"><svg class="i"><use href="#i-x"/></svg></button></header>
+    <div class="stack">
+      <textarea id="replyText" placeholder="Deine Antwort …" aria-label="Antwort"></textarea>
+      <div id="replyToolbar"></div>
+      <div id="draft-reply" class="draft"></div>
+      <button class="btn btn-primary btn-block" data-act="reply-save"><svg class="i"><use href="#i-send"/></svg>Antworten</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="entryModal" role="dialog" aria-modal="true" aria-labelledby="entryModal-t" aria-hidden="true">
+  <div class="sheet"><div class="grab"></div>
+    <header class="sheet-head"><h2 id="entryModal-t">➕ Tagebucheintrag</h2><button class="btn btn-ghost btn-icon btn-sm" data-close="entryModal" aria-label="Schließen"><svg class="i"><use href="#i-x"/></svg></button></header>
+    <div class="stack">
+      <div class="field"><label for="entryAddress">Ort</label>
+        <div class="row" style="gap:8px">
+          <input type="text" id="entryAddress" placeholder="Adresse oder Ort …" autocomplete="off" class="grow">
+          <button class="btn btn-ghost btn-icon" data-act="entry-gps" aria-label="GPS-Standort verwenden" title="Mein Standort"><svg class="i"><use href="#i-locate"/></svg></button>
+        </div>
+        <ul class="suggest inline" id="entrySuggest" hidden></ul>
+        <span class="hint" id="entryGeoState"></span>
+      </div>
+      <div class="field"><label for="entryTitle">Titel der Station</label><input type="text" id="entryTitle" placeholder="Titel eingeben …"></div>
+      <div class="grid-2">
+        <div class="field"><label for="entryDate">Datum</label><input type="date" id="entryDate"></div>
+        <div class="field"><label for="entryTime">Uhrzeit</label><input type="time" id="entryTime"></div>
+      </div>
+      <div class="field"><label for="entryDesc">Erlebnisse / Notizen</label><textarea id="entryDesc" rows="3" placeholder="Was hast du erlebt?"></textarea></div>
+      <div id="entryToolbar"></div>
+      <div id="draft-travel" class="draft"></div>
+      <button class="btn btn-primary btn-block" data-act="entry-save">Eintrag speichern</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="routeModal" role="dialog" aria-modal="true" aria-labelledby="routeModal-t" aria-hidden="true">
+  <div class="sheet wide"><div class="grab"></div>
+    <header class="sheet-head"><h2 id="routeModal-t">🗺️ Exakter Streckenplaner</h2><button class="btn btn-ghost btn-icon btn-sm" data-close="routeModal" aria-label="Schließen"><svg class="i"><use href="#i-x"/></svg></button></header>
+    <div class="stack">
+      <form novalidate id="routeSearchForm" class="search"><svg class="i"><use href="#i-search"/></svg><input type="search" id="routeSearchInput" placeholder="Karte zu einem Ort bewegen …" aria-label="Ort suchen"><button class="btn btn-soft" type="submit">Los</button></form>
+      <ul class="suggest inline" id="routeSuggest" hidden></ul>
+      <div class="map-wrap"><div id="routeDrawMap" class="map" style="height:280px;min-height:240px"></div></div>
+      <div class="row wrap" style="gap:8px">
+        <button class="btn btn-soft btn-sm" data-act="pin-center"><svg class="i"><use href="#i-target"/></svg>Nadel in Kartenmitte</button>
+        <button class="btn btn-soft btn-sm" data-act="pin-gps"><svg class="i"><use href="#i-locate"/></svg>GPS als Nadel</button>
+        <button class="btn btn-ok btn-sm" data-act="pin-close"><svg class="i"><use href="#i-loop"/></svg>Verbinden</button>
+        <button class="btn btn-ghost btn-sm" data-act="pin-undo"><svg class="i"><use href="#i-undo"/></svg>Letzte löschen</button>
+        <button class="btn btn-danger btn-sm" data-act="pin-clear"><svg class="i"><use href="#i-trash"/></svg>Neu</button>
+      </div>
+      <div id="pinStatusIndicator" class="status-line"></div>
+      <div id="pinsListContainer" class="pin-list"></div>
+      <div class="field"><label for="routeMovementType">Fortbewegung</label><select id="routeMovementType"></select></div>
+      <div class="field"><label for="drawModalTitle">Titel</label><input type="text" id="drawModalTitle" placeholder="Tourenname …"></div>
+      <div class="grid-2">
+        <div class="field"><label for="drawModalDate">Datum</label><input type="date" id="drawModalDate"></div>
+        <div class="field"><label for="drawModalTime">Uhrzeit</label><input type="time" id="drawModalTime"></div>
+      </div>
+      <button class="btn btn-primary btn-block" data-act="route-save">Strecke speichern</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="pinModal" role="dialog" aria-modal="true" aria-labelledby="pinModalStationTitle" aria-hidden="true">
+  <div class="sheet"><div class="grab"></div>
+    <header class="sheet-head"><h2 id="pinModalStationTitle">Station bearbeiten</h2><button class="btn btn-ghost btn-icon btn-sm" data-close="pinModal" aria-label="Schließen"><svg class="i"><use href="#i-x"/></svg></button></header>
+    <div class="stack">
+      <div class="field"><label for="pinEditTitleInput">Name der Station</label><input type="text" id="pinEditTitleInput"></div>
+      <div class="grid-2">
+        <div class="field"><label for="pinEditDateInput">Datum</label><input type="date" id="pinEditDateInput"></div>
+        <div class="field"><label for="pinEditTimeInput">Uhrzeit</label><input type="time" id="pinEditTimeInput"></div>
+      </div>
+      <div class="field"><label for="pinEditNoteInput">Ausführliche Notizen &amp; Text</label><textarea id="pinEditNoteInput" rows="4" placeholder="Schreibe deine Erlebnisse zu dieser Nadel …"></textarea></div>
+      <div id="pinToolbar"></div>
+      <div id="draft-pin" class="draft"></div>
+      <div class="row" style="gap:8px">
+        <button class="btn btn-danger" data-act="pin-delete"><svg class="i"><use href="#i-trash"/></svg></button>
+        <button class="btn btn-primary grow" data-act="pin-save">Station speichern</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="confirmModal" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmText" aria-hidden="true">
+  <div class="sheet"><div class="grab"></div>
+    <header class="sheet-head"><h2 id="confirmTitle">Sicher?</h2></header>
+    <div class="stack">
+      <p id="confirmText" class="muted"></p>
+      <div class="row" style="gap:8px">
+        <button class="btn btn-ghost grow" data-act="confirm-no">Abbrechen</button>
+        <button class="btn btn-danger grow" id="confirmOk" data-act="confirm-yes">Ja</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<noscript><p style="padding:24px;font-family:sans-serif">Für den Reiseplaner wird JavaScript benötigt.</p></noscript>
+<script>
+'use strict';
+/* =====================================================================
+   Kartenansicht – eigene, kleine Implementierung (ohne Fremd-Skript)
+   ---------------------------------------------------------------------
+   Kacheln, Marker (auch verschiebbar), Linien, Kreis, Popups, Zoom/Schieben per
+   Maus, Touch, Mausrad, Tastatur. Die Programmierschnittstelle ist eine Teilmenge
+   von Leaflet (L.map, L.marker, L.polyline …), damit der restliche Code schlicht
+   bleibt. Auch wenn keine Kartenkacheln geladen werden können (offline, blockiert),
+   bleiben Marker, Strecken und Radius sichtbar.
+   ===================================================================== */
+const L = (() => {
+  const TILE = 256, MAXLAT = 85.0511287798, EARTH = 40075016.686;
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const mk = (tag, cls, parent) => { const e = document.createElement(tag); if (cls) e.className = cls; if (parent) parent.appendChild(e); return e; };
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  const mkSvg = (tag, parent) => { const e = document.createElementNS(SVGNS, tag); if (parent) parent.appendChild(e); return e; };
+
+  /* Koordinaten prüfen: Arrays [lat, lon] oder Objekte {lat, lng|lon} */
+  function chk(p) {
+    const o = Array.isArray(p) ? { lat: +p[0], lng: +p[1] } : p ? { lat: +p.lat, lng: +(p.lng ?? p.lon) } : { lat: NaN, lng: NaN };
+    if (!isFinite(o.lat) || !isFinite(o.lng)) throw new Error('Ungültige Koordinaten: ' + JSON.stringify(p));
+    return o;
+  }
+  /* Web-Mercator */
+  function project(p, z) {
+    const s = TILE * 2 ** z, sin = Math.sin(clamp(p.lat, -MAXLAT, MAXLAT) * Math.PI / 180);
+    return { x: (p.lng + 180) / 360 * s, y: (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * s };
+  }
+  function unproject(p, z) {
+    const s = TILE * 2 ** z, n = Math.PI - 2 * Math.PI * p.y / s;
+    return { lat: 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n))), lng: p.x / s * 360 - 180 };
+  }
+  const metersPerPx = (lat, z) => EARTH * Math.cos(lat * Math.PI / 180) / (TILE * 2 ** z);
+
+  class Evented {
+    on(t, f) { (this._h || (this._h = {}))[t] = (this._h[t] || []).concat(f); return this; }
+    off(t, f) { if (this._h && this._h[t]) this._h[t] = f ? this._h[t].filter(x => x !== f) : []; return this; }
+    fire(t, d) {
+      const h = this._h && this._h[t];
+      if (h) h.slice().forEach(f => f.call(this, Object.assign({ type: t, target: this }, d || {})));
+      return this;
     }
-} 
-function completeLogin(user) { 
-    localStorage.setItem('jannik_current_user', user); 
-    document.getElementById('authOverlay').style.display = 'none'; 
-    document.getElementById('mainAppContainer').style.display = 'flex'; 
-    initApp(); 
-} 
-function handleLogout() { location.reload(); } 
+  }
 
-function getCloudSettings() {
-    return JSON.parse(localStorage.getItem('jannik_cloud_settings') || '{"provider":"nextcloud","endpoint":"","token":""}');
-}
-function saveCloudSettings() {
-    const provider = document.getElementById('cloudProviderSelect').value;
-    const endpoint = document.getElementById('cloudEndpointInput').value.trim();
-    const token = document.getElementById('cloudTokenInput').value.trim();
-    localStorage.setItem('jannik_cloud_settings', JSON.stringify({provider, endpoint, token}));
-    document.getElementById('currentCloudProviderLabel').innerText = provider === 'nextcloud' ? 'Nextcloud (WebDAV)' : (provider === 'onedrive' ? 'Microsoft OneDrive' : 'Google Cloud Storage');
-    showToast("☁️ Cloud-Einstellungen gespeichert & Daten synchronisiert!");
-}
-function loadCloudSettingsIntoUI() {
-    const s = getCloudSettings();
-    document.getElementById('cloudProviderSelect').value = s.provider;
-    document.getElementById('cloudEndpointInput').value = s.endpoint;
-    document.getElementById('cloudTokenInput').value = s.token;
-    document.getElementById('currentCloudProviderLabel').innerText = s.provider === 'nextcloud' ? 'Nextcloud (WebDAV)' : (s.provider === 'onedrive' ? 'Microsoft OneDrive' : 'Google Cloud Storage');
-}
-
-let mainMap = null, timelineMap = null, routeDrawMap = null; 
-let mainMarker = null, radiusCircle = null, poiMarkersGroup = null, timelineGroup = null, drawGroup = null; 
-let currentLat = 48.8566, currentLon = 2.3522; 
-let cachedWeatherData = null;
-let tempChartInstance = null, rainChartInstance = null, windChartInstance = null; 
-let currentWeatherTab = 'hourly'; 
-let fetchedPoiList = []; 
-let selectedPoiCategoryTab = 'all'; 
-let selectedChronicleYear = 'all'; 
-
-function initApp() { 
-    if (!mainMap) { 
-        mainMap = L.map('map', { zoomControl: false }).setView([currentLat, currentLon], 14); 
-        addLayerControlToMap(mainMap); 
-        poiMarkersGroup = L.layerGroup().addTo(mainMap); 
-        mainMarker = L.marker([currentLat, currentLon], { draggable: true }).addTo(mainMap); 
-        mainMarker.on('dragend', e => updateLocationByCoords(e.target.getLatLng().lat, e.target.getLatLng().lng)); 
-        mainMap.on('click', e => updateLocationByCoords(e.latlng.lat, e.latlng.lng)); 
-    } 
-    loadCloudSettingsIntoUI();
-    showModal('startLocationOverlay'); 
-    renderPostsFeed(); 
-    renderTravelEntries(); 
-    renderDistanceStatsSummary(); 
-    renderPoiCategoryTabs(); 
-    renderChronicleYearFilter(); 
-} 
-
-function submitStartLocation() { 
-    const query = document.getElementById('startAddrInput').value.trim(); 
-    if (!query) return; 
-    geocodeAddress(query, (lat, lon, name) => { 
-        updateLocationByCoords(lat, lon, name); 
-        closeModal('startLocationOverlay'); 
-    }); 
-} 
-
-function submitCurrentLocationStartup() { 
-    if ("geolocation" in navigator) { 
-        showToast("📍 Ermittle GPS-Standort..."); 
-        navigator.geolocation.getCurrentPosition( 
-            pos => { 
-                updateLocationByCoords(pos.coords.latitude, pos.coords.longitude, "Mein Standort"); 
-                closeModal('startLocationOverlay'); 
-                showToast("GPS erfolgreich ermittelt!"); 
-            }, 
-            err => { 
-                showToast("GPS fehlgeschlagen. Nutze Standard (Paris)."); 
-                updateLocationByCoords(48.8566, 2.3522, "Paris"); 
-                closeModal('startLocationOverlay'); 
-            }, 
-            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 } 
-        ); 
-    } else { 
-        showToast("GPS nicht unterstützt. Nutze Standard."); 
-        updateLocationByCoords(48.8566, 2.3522, "Paris"); 
-        closeModal('startLocationOverlay'); 
-    } 
-} 
-function setMyCurrentLocation() { submitCurrentLocationStartup(); } 
-
-function geocodeAddress(query, callback) { 
-    fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`) 
-        .then(res => res.json()) 
-        .then(data => { 
-            if (data && data[0]) callback(parseFloat(data[0].lat), parseFloat(data[0].lon), data[0].display_name.split(',')[0]); 
-            else showToast("Ort nicht gefunden."); 
-        }).catch(() => showToast("Suchfehler.")); 
-} 
-
-function updateLocationByCoords(lat, lon, name = null) { 
-    currentLat = lat; currentLon = lon; 
-    if (mainMap) {
-        mainMap.setView([lat, lon], 14); 
-        setTimeout(() => mainMap.invalidateSize(), 200);
+  /* ---------- Kachelquelle (nur Beschreibung, gehört keiner Karte) ---------- */
+  class TileLayer {
+    constructor(url, o) { this.url = url; this.o = Object.assign({ maxZoom: 18, subdomains: 'abc', attribution: '' }, o); }
+    tileUrl(x, y, z) {
+      const n = 2 ** z, s = this.o.subdomains, hi = (window.devicePixelRatio || 1) > 1.25;
+      return this.url.replace('{s}', s[Math.abs(x + y) % s.length]).replace('{z}', z).replace('{x}', ((x % n) + n) % n).replace('{y}', y).replace('{r}', hi ? '@2x' : '');
     }
-    if (mainMarker) mainMarker.setLatLng([lat, lon]); 
-    updateRadiusCircle(); 
-    
-    if (name) { 
-        document.getElementById('weatherCityName').innerText = name; 
-        document.getElementById('infoCity').innerText = name; 
-        fetchWikipediaAndFacts(name); 
-    } else { 
-        fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`) 
-            .then(r => r.json()) 
-            .then(d => { 
-                const cityName = d.address ? (d.address.city || d.address.town || d.address.village || "Standort") : "Standort"; 
-                document.getElementById('infoCity').innerText = cityName; 
-                document.getElementById('weatherCityName').innerText = cityName; 
-                document.getElementById('infoPostalCode').innerText = d.address?.postcode || "Verfügbar"; 
-                document.getElementById('infoCountryState').innerText = (d.address?.country || "Deutschland"); 
-                fetchWikipediaAndFacts(cityName); 
-            }).catch(() => {
-                document.getElementById('infoCity').innerText = "Standort";
-                fetchWikipediaAndFacts("Standort");
-            }); 
-    } 
-    fetchWeatherData(lat, lon); 
-    fetchOverpassPOIs(lat, lon); 
-} 
+    addTo(map) { map.setBase(this); return this; }
+  }
 
-function searchLocation() { 
-    const q = document.getElementById('citySearch').value.trim(); 
-    if (q) geocodeAddress(q, (lat, lon, name) => updateLocationByCoords(lat, lon, name)); 
-} 
-function handleRadiusInputChange(e) { 
-    document.getElementById('radiusValue').innerText = e.target.value; 
-    updateRadiusCircle(); 
-    filterPOIsDisplay();
-} 
-function updateRadiusCircle() { 
-    const radKm = parseFloat(document.getElementById('radiusRange').value) || 0.5; 
-    if (radiusCircle && mainMap) mainMap.removeLayer(radiusCircle); 
-    if (mainMap) {
-        radiusCircle = L.circle([currentLat, currentLon], { radius: radKm * 1000, color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.15 }).addTo(mainMap); 
+  /* ---------- Ebenen ---------- */
+  class Layer extends Evented {
+    addTo(target) { target.addLayer(this); return this; }
+    remove() { if (this._group) this._group.removeLayer(this); else if (this._map) this._map.removeLayer(this); return this; }
+  }
+
+  class LayerGroup extends Layer {
+    constructor() { super(); this._layers = new Set(); }
+    addLayer(l) { this._layers.add(l); l._group = this; if (this._map) l._onAdd(this._map); return this; }
+    removeLayer(l) { if (this._layers.delete(l)) { l._group = null; if (l._map) l._onRemove(); } return this; }
+    clearLayers() { Array.from(this._layers).forEach(l => this.removeLayer(l)); return this; }
+    _onAdd(map) { this._map = map; this._layers.forEach(l => l._onAdd(map)); }
+    _onRemove() { this._layers.forEach(l => { if (l._map) l._onRemove(); }); this._map = null; }
+    _update() { this._layers.forEach(l => l._update && l._update()); }
+  }
+
+  class Marker extends Layer {
+    constructor(p, o) {
+      super();
+      this._ll = chk(p);
+      this.options = o || {};
+      this._icon = this.options.icon || { className: '', html: '<div class="poi-pin"></div>', iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -15] };
     }
-} 
-function openGoogleMapsNavigation(lat = currentLat, lon = currentLon) { 
-    window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`, '_blank'); 
-} 
-
-function fetchWeatherData(lat, lon) { 
-    fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max&hourly=temperature_2m,precipitation,windspeed_10m&timezone=auto`) 
-        .then(res => res.json()) 
-        .then(data => { 
-            cachedWeatherData = data; 
-            renderWeatherGrid(data); 
-            renderWeatherHoursFuture(data); 
-        }) 
-        .catch(() => {}); 
-} 
-function renderWeatherGrid(data) { 
-    const grid = document.getElementById('weatherGrid'); 
-    if (!grid || !data.daily) return; 
-    grid.innerHTML = data.daily.time.slice(0, 4).map((d, i) => `<div class="weather-day"><div>${d.slice(5)}</div><div style="font-size:1.3rem;">☀️</div><div>${Math.round(data.daily.temperature_2m_max[i])}°C</div></div>`).join(''); 
-} 
-
-function renderWeatherHoursFuture(data) { 
-    const hoursGrid = document.getElementById('weatherHoursGrid'); 
-    if (!hoursGrid || !data.hourly) return; 
-    hoursGrid.innerHTML = ''; 
-    
-    const now = new Date(); 
-    const currentHourStr = now.toISOString().slice(0, 13); 
-    
-    let futureSlots = []; 
-    for(let i=0; i<data.hourly.time.length; i++) {
-        let t = data.hourly.time[i]; 
-        let slotHourStr = t.slice(0, 13);
-        if (slotHourStr >= currentHourStr) {
-            futureSlots.push({ time: t, temp: data.hourly.temperature_2m[i] });
+    getLatLng() { return { lat: this._ll.lat, lng: this._ll.lng }; }
+    setLatLng(p) { this._ll = chk(p); this._place(); return this; }
+    bindPopup(html) { this._popupHtml = html; return this; }
+    openPopup() {
+      if (this._map && this._popupHtml != null) this._map._openPopup(new Popup().setLatLng(this._ll).setContent(this._popupHtml), this, this._icon.popupAnchor);
+      return this;
+    }
+    closePopup() { if (this._map && this._map._popupSrc === this) this._map.closePopup(); return this; }
+    _onAdd(map) {
+      this._map = map;
+      const ic = this._icon, el = this._el = mk('div', ('gm-marker ' + (ic.className || '')).trim(), map._marks);
+      el.innerHTML = ic.html || '';
+      const sz = ic.iconSize || [30, 30], an = ic.iconAnchor || [sz[0] / 2, sz[1] / 2];
+      el.style.width = sz[0] + 'px'; el.style.height = sz[1] + 'px';
+      el.style.marginLeft = -an[0] + 'px'; el.style.marginTop = -an[1] + 'px';
+      if (this.options.title) el.title = this.options.title;
+      if (this._popupHtml != null || this.options.draggable) { el.tabIndex = 0; el.setAttribute('role', 'button'); }
+      this._bind(el);
+      this._place();
+    }
+    _onRemove() {
+      if (this._map && this._map._popupSrc === this) this._map.closePopup();
+      if (this._el) this._el.remove();
+      this._el = null; this._map = null;
+    }
+    _update() { this._place(); }
+    _place() {
+      if (!this._el || !this._map) return;
+      const p = this._map.latLngToLayerPoint(this._ll);
+      this._el.style.transform = `translate3d(${p.x}px,${p.y}px,0)`;
+      this._el.style.zIndex = String(1000000 + Math.round(p.y) + (this.options.zIndexOffset || 0) * 100);
+    }
+    _bind(el) {
+      let st = null;
+      el.addEventListener('pointerdown', e => {
+        if (e.button) return;
+        e.stopPropagation();
+        const map = this._map, r = map._el.getBoundingClientRect(), mp = map.latLngToContainerPoint(this._ll);
+        st = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false, dx: e.clientX - r.left - mp.x, dy: e.clientY - r.top - mp.y };
+        if (this.options.draggable) { try { el.setPointerCapture(e.pointerId); } catch { /* egal */ } }
+      });
+      el.addEventListener('pointermove', e => {
+        if (!st || e.pointerId !== st.id) return;
+        if (!st.moved && Math.hypot(e.clientX - st.x, e.clientY - st.y) > 4) { st.moved = true; if (this.options.draggable) el.classList.add('gm-dragging'); }
+        if (st.moved && this.options.draggable) {
+          const r = this._map._el.getBoundingClientRect();
+          this._ll = this._map.containerPointToLatLng({ x: e.clientX - r.left - st.dx, y: e.clientY - r.top - st.dy });
+          this._place();
+          this.fire('drag');
         }
+      });
+      const end = e => {
+        if (!st || e.pointerId !== st.id) return;
+        const s = st; st = null;
+        el.classList.remove('gm-dragging');
+        if (s.moved && this.options.draggable) this.fire('dragend');
+        else if (!s.moved && e.type === 'pointerup') this._click();
+      };
+      el.addEventListener('pointerup', end);
+      el.addEventListener('pointercancel', end);
+      el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this._click(); } });
     }
-    
-    hoursGrid.innerHTML = futureSlots.slice(0, 12).map(slot => ` 
-        <div class="hour-slot"> 
-            <div>${slot.time.slice(11, 16)}</div> 
-            <div style="font-weight:bold; color:var(--accent-color);">${Math.round(slot.temp)}°C</div> 
-        </div> 
-    `).join('') || '<div style="color:var(--text-muted); font-size:0.8rem;">Keine weiteren Stunden verfügbar.</div>'; 
-} 
+    _click() {
+      this.fire('click');
+      if (this._popupHtml == null || !this._map) return;
+      if (this._map._popupSrc === this) this._map.closePopup(); else this.openPopup();
+    }
+  }
 
-function openWeatherDetailsModal() { showModal('weatherDetailsModal'); if (cachedWeatherData) setTimeout(() => updateAllWeatherCharts(cachedWeatherData), 100); } 
-function switchWeatherTab(tab) { 
-    currentWeatherTab = tab; 
-    document.getElementById('btnWeatherHourly').style.background = (tab === 'hourly') ? 'var(--accent-color)' : '#334155'; 
-    document.getElementById('btnWeatherWeekly').style.background = (tab === 'weekly') ? 'var(--accent-color)' : '#334155'; 
-    if (cachedWeatherData) updateAllWeatherCharts(cachedWeatherData); 
-} 
+  class Popup extends Layer {
+    setLatLng(p) { this._ll = chk(p); return this; }
+    setContent(h) { this._html = h; return this; }
+    openOn(map) { map._openPopup(this, null, [0, 0]); return this; }
+  }
 
-function updateAllWeatherCharts(data) { 
-    let labels = currentWeatherTab === 'hourly' ? data.hourly.time.slice(0, 24).map(t => t.slice(11, 16)) : data.daily.time; 
-    let temp = currentWeatherTab === 'hourly' ? data.hourly.temperature_2m.slice(0, 24) : data.daily.temperature_2m_max; 
-    let rain = currentWeatherTab === 'hourly' ? data.hourly.precipitation.slice(0, 24) : data.daily.precipitation_sum; 
-    let wind = currentWeatherTab === 'hourly' ? data.hourly.windspeed_10m.slice(0, 24) : data.daily.windspeed_10m_max; 
+  const STYLE_ATTR = { color: 'stroke', weight: 'stroke-width', opacity: 'stroke-opacity', dashArray: 'stroke-dasharray', fillColor: 'fill', fillOpacity: 'fill-opacity' };
+  function applyStyle(el, o) {
+    el.setAttribute('stroke-linecap', 'round'); el.setAttribute('stroke-linejoin', 'round');
+    Object.entries(STYLE_ATTR).forEach(([k, a]) => { if (o[k] != null) el.setAttribute(a, o[k]); });
+  }
 
-    if (tempChartInstance) tempChartInstance.destroy(); 
-    tempChartInstance = new Chart(document.getElementById('tempChart').getContext('2d'), { 
-        type: 'line', data: { labels, datasets: [{ label: '°C', data: temp, borderColor: '#3b82f6', fill: true, backgroundColor: 'rgba(59, 130, 246, 0.1)' }] }, 
-        options: { responsive: true, maintainAspectRatio: false } 
-    }); 
+  class Polyline extends Layer {
+    constructor(pts, o) { super(); this._pts = (pts || []).map(chk); this.options = Object.assign({ color: '#3388ff', weight: 3, opacity: 1 }, o); }
+    setLatLngs(pts) { this._pts = (pts || []).map(chk); this._update(); return this; }
+    _onAdd(map) {
+      this._map = map;
+      this._el = mkSvg('path', map._svg);
+      this._el.setAttribute('fill', 'none');
+      applyStyle(this._el, this.options);
+      this._update();
+    }
+    _onRemove() { if (this._el) this._el.remove(); this._el = null; this._map = null; }
+    _update() {
+      if (!this._el || !this._map) return;
+      this._el.setAttribute('d', this._pts.map((p, i) => { const q = this._map.latLngToLayerPoint(p); return (i ? 'L' : 'M') + q.x.toFixed(1) + ' ' + q.y.toFixed(1); }).join(''));
+    }
+  }
 
-    if (rainChartInstance) rainChartInstance.destroy(); 
-    rainChartInstance = new Chart(document.getElementById('rainChart').getContext('2d'), { 
-        type: 'bar', data: { labels, datasets: [{ label: 'mm', data: rain, backgroundColor: '#06b6d4' }] }, 
-        options: { responsive: true, maintainAspectRatio: false } 
-    }); 
+  class Circle extends Layer {
+    constructor(p, o) { super(); this._ll = chk(p); this.options = Object.assign({ color: '#3388ff', weight: 3, opacity: 1, fillOpacity: .2, radius: 100 }, o); if (!isFinite(this.options.radius)) throw new Error('Ungültiger Radius'); }
+    _onAdd(map) { this._map = map; this._el = mkSvg('circle', map._svg); applyStyle(this._el, Object.assign({ fillColor: this.options.fillColor || this.options.color }, this.options)); this._update(); }
+    _onRemove() { if (this._el) this._el.remove(); this._el = null; this._map = null; }
+    _update() {
+      if (!this._el || !this._map) return;
+      const p = this._map.latLngToLayerPoint(this._ll);
+      this._el.setAttribute('cx', p.x.toFixed(1)); this._el.setAttribute('cy', p.y.toFixed(1));
+      this._el.setAttribute('r', Math.max(1, this.options.radius / metersPerPx(this._ll.lat, this._map._z)).toFixed(1));
+    }
+  }
 
-    if (windChartInstance) windChartInstance.destroy(); 
-    windChartInstance = new Chart(document.getElementById('windChart').getContext('2d'), { 
-        type: 'line', data: { labels, datasets: [{ label: 'km/h', data: wind, borderColor: '#10b981', fill: true, backgroundColor: 'rgba(16, 185, 129, 0.1)' }] }, 
-        options: { responsive: true, maintainAspectRatio: false } 
-    }); 
-} 
+  /* ---------- Karte ---------- */
+  class GMap extends Evented {
+    constructor(target, opts) {
+      super();
+      const el = typeof target === 'string' ? document.getElementById(target) : target;
+      if (!el) throw new Error('Kartenfläche nicht gefunden.');
+      if (el._gm) throw new Error('Karte ist bereits aufgebaut.');
+      el._gm = this;
+      this._el = el;
+      this.options = Object.assign({ minZoom: 2, maxZoom: 19 }, opts);
+      this._layers = new Set(); this._tiles = new Map();
+      this._z = 3; this._pan = { x: 0, y: 0 }; this._origin = { x: 0, y: 0 }; this._size = { x: 0, y: 0 };
+      this._tOk = 0; this._tErr = 0; this._tried = null; this._autoBase = true;
+      this._build();
+      this._size = { x: el.clientWidth, y: el.clientHeight };
+      this._setState(this._z, { lat: 20, lng: 0 });
+      this._events();
+      if (window.ResizeObserver) { let q = 0; new ResizeObserver(() => { cancelAnimationFrame(q); q = requestAnimationFrame(() => this.invalidateSize()); }).observe(el); }
+    }
 
-function fetchWikipediaAndFacts(cityName) { 
-    fetch(`https://de.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(cityName)}`) 
-        .then(res => res.json()) 
-        .then(d => { 
-            document.getElementById('cityLocationDesc').innerText = d.extract || "Keine Wikipedia-Beschreibung gefunden."; 
-            document.getElementById('infoPostalCode').innerText = d.description ? d.description : "Verfügbar"; 
-            document.getElementById('infoCountryState').innerText = "Europa"; 
-        }) 
-        .catch(() => { document.getElementById('cityLocationDesc').innerText = "Standortinformationen geladen."; }); 
-} 
+    _build() {
+      const el = this._el;
+      el.innerHTML = '';
+      el.classList.add('gm');
+      el.tabIndex = 0;
+      el.setAttribute('role', 'application');
+      el.setAttribute('aria-label', 'Karte');
+      this._pane = mk('div', 'gm-pane', el);
+      this._tilePane = mk('div', 'gm-tiles', this._pane);
+      this._svg = mkSvg('svg', this._pane);
+      this._svg.setAttribute('class', 'gm-vec'); this._svg.setAttribute('width', '1'); this._svg.setAttribute('height', '1');
+      this._marks = mk('div', 'gm-marks', this._pane);
+      this._pops = mk('div', 'gm-pops', this._pane);
+      this._msg = mk('div', 'gm-msg', el); this._msg.hidden = true;
+      this._msg.textContent = 'Kartenkacheln lassen sich gerade nicht laden (offline oder blockiert). Marker, Strecken und der Umkreis werden trotzdem angezeigt.';
+      const ctl = mk('div', 'gm-ctl', el);
+      const tl = mk('div', 'gm-corner gm-tl', ctl), tr = mk('div', 'gm-corner gm-tr', ctl), bl = mk('div', 'gm-corner gm-bl', ctl), br = mk('div', 'gm-corner gm-br', ctl);
+      const zoom = mk('div', 'gm-bar', tl);
+      this._zin = mk('button', 'gm-btn', zoom); this._zin.type = 'button'; this._zin.textContent = '+'; this._zin.setAttribute('aria-label', 'Hineinzoomen');
+      this._zout = mk('button', 'gm-btn', zoom); this._zout.type = 'button'; this._zout.textContent = '−'; this._zout.setAttribute('aria-label', 'Herauszoomen');
+      this._zin.addEventListener('click', () => this.zoomBy(1));
+      this._zout.addEventListener('click', () => this.zoomBy(-1));
+      this._layersBox = mk('div', 'gm-layers', tr);
+      this._scale = mk('div', 'gm-scale', bl);
+      this._attr = mk('div', 'gm-attr', br);
+    }
 
-function fetchOverpassPOIs(lat, lon) { 
-    const overlay = document.getElementById('mainMapOverlay'); 
-    if (overlay) overlay.style.display = 'flex'; 
-    
-    const latDelta = 0.2; 
-    const lonDelta = 0.2 / Math.cos(lat * Math.PI / 180.0);
-    const south = lat - latDelta;
-    const north = lat + latDelta;
-    const west = lon - lonDelta;
-    const east = lon + lonDelta;
+    /* --- Grundkarten --- */
+    setBases(bases, active) {
+      this._bases = bases;
+      const box = this._layersBox; box.innerHTML = '';
+      const toggle = mk('button', 'gm-btn gm-layers-btn', box); toggle.type = 'button'; toggle.setAttribute('aria-label', 'Kartenart wählen'); toggle.setAttribute('aria-expanded', 'false');
+      toggle.innerHTML = '<svg class="i" aria-hidden="true"><use href="#i-layers"></use></svg>';
+      const menu = mk('div', 'gm-menu', box); menu.hidden = true;
+      toggle.addEventListener('click', () => { menu.hidden = !menu.hidden; toggle.setAttribute('aria-expanded', String(!menu.hidden)); });
+      Object.keys(bases).forEach(name => {
+        const b = mk('button', 'gm-opt', menu); b.type = 'button'; b.textContent = name; b.dataset.base = name;
+        b.addEventListener('click', () => { this._autoBase = false; this._tried = null; this.setBase(name); menu.hidden = true; toggle.setAttribute('aria-expanded', 'false'); });
+      });
+      this.setBase(active || Object.keys(bases)[0]);
+    }
+    setBase(b) {
+      let name = null;
+      if (typeof b === 'string') { name = b; b = this._bases && this._bases[b]; }
+      else if (this._bases) name = Object.keys(this._bases).find(k => this._bases[k] === b) || null;
+      if (!b || b === this._base) return this;
+      this._base = b; this._baseName = name;
+      this._tiles.forEach(i => i.remove()); this._tiles.clear();
+      this._tOk = 0; this._tErr = 0; this._msg.hidden = true;
+      this._attr.innerHTML = b.o.attribution || '';
+      this._layersBox.querySelectorAll('.gm-opt').forEach(o => o.setAttribute('aria-pressed', String(o.dataset.base === name)));
+      if (this._z > b.o.maxZoom) this._setState(b.o.maxZoom, this.getCenter()); else this._updateTiles();
+      this._syncZoomButtons();
+      return this;
+    }
+    _tileOk() { this._tOk++; this._tried = null; this._msg.hidden = true; }
+    _tileErr() {
+      this._tErr++;
+      if (this._tOk > 0 || this._tErr < 5) return;
+      /* Lädt keine einzige Kachel: reihum andere Kartenquellen probieren (jede URL nur einmal) */
+      const tried = this._tried || (this._tried = new Set());
+      if (this._base) tried.add(this._base.url);
+      const alt = this._bases && ['Karte', 'Topografisch', 'OpenStreetMap', 'Satellit'].find(n => this._bases[n] && !tried.has(this._bases[n].url));
+      if (alt) { this.setBase(alt); return; }
+      this._msg.hidden = false;
+      this.fire('tileblocked');
+    }
 
-    const query = `[out:json][timeout:10];(
-      node(${south},${west},${north},${east})[amenity];
-      node(${south},${west},${north},${east})[shop];
-      node(${south},${west},${north},${east})[tourism];
-      node(${south},${west},${north},${east})[historic];
-    );out body;`; 
-    
-    fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: query }) 
-        .then(res => res.json()) 
-        .then(data => { 
-            if (overlay) overlay.style.display = 'none'; 
-            processPoiData(data, lat, lon); 
-        }) 
-        .catch(() => { 
-            fetch('https://overpass.kumi.systems/api/interpreter', { method: 'POST', body: query })
-                .then(res => res.json())
-                .then(data => {
-                    if (overlay) overlay.style.display = 'none';
-                    processPoiData(data, lat, lon);
-                })
-                .catch(() => {
-                    if (overlay) overlay.style.display = 'none';
-                    fetchedPoiList = [];
-                    filterPOIsDisplay();
-                    showToast("Keine POIs gefunden. Bitte 'Aktualisieren' tippen.");
-                });
-        }); 
-} 
+    /* --- Zustand: Zoomstufe + Mittelpunkt; Verschiebung läuft über _pan --- */
+    _clampZoom(z) { return clamp(Math.round(z), this.options.minZoom, Math.min(this.options.maxZoom, this._base ? this._base.o.maxZoom : 19)); }
+    _setState(z, c) {
+      c = chk(c);
+      const zoomChanged = z !== this._z || !this._ready;
+      this._z = z;
+      const p = project(c, z);
+      this._origin = { x: Math.round(p.x - this._size.x / 2), y: Math.round(p.y - this._size.y / 2) };
+      this._pan = { x: 0, y: 0 };
+      this._ready = true;
+      this._applyPan();
+      if (zoomChanged) { this._tiles.forEach(i => { i.onload = i.onerror = null; i.remove(); }); this._tiles.clear(); }
+      else this._tiles.forEach(i => { i.style.transform = `translate3d(${i._tx * TILE - this._origin.x}px,${i._ty * TILE - this._origin.y}px,0)`; });
+      this._updateTiles();
+      this._layers.forEach(l => l._update && l._update());
+      if (this._popup) this._popup._place();
+      this._syncZoomButtons();
+      this._updateScale();
+      this.fire('moveend');
+    }
+    _applyPan() { this._pane.style.transform = `translate3d(${this._pan.x}px,${this._pan.y}px,0)`; }
+    _syncZoomButtons() {
+      const max = this._base ? Math.min(this.options.maxZoom, this._base.o.maxZoom) : this.options.maxZoom;
+      this._zin.disabled = this._z >= max; this._zout.disabled = this._z <= this.options.minZoom;
+    }
 
-function processPoiData(data, lat, lon) {
-    const raw = data.elements || []; 
-    fetchedPoiList = raw.map((item, idx) => { 
-        const itemLat = item.lat; 
-        const itemLon = item.lon; 
-        if (!itemLat || !itemLon) return null; 
-        const realName = item.tags?.name || item.tags?.brand || item.tags?.amenity || item.tags?.tourism || item.tags?.historic; 
-        if (!realName) return null; 
-        
-        const dist = getDistanceKm(lat, lon, itemLat, itemLon); 
-        let cat = null; 
-        const amenity = item.tags?.amenity;
-        const tourism = item.tags?.tourism;
-        const shop = item.tags?.shop;
-        const historic = item.tags?.historic;
-        
-        if (amenity === 'parking') cat = 'parking'; 
-        else if (shop) cat = 'shops'; 
-        else if (amenity === 'fuel') cat = 'fuel'; 
-        else if (amenity === 'charging_station') cat = 'charging'; 
-        else if (amenity === 'restaurant' || amenity === 'cafe' || amenity === 'fast_food' || amenity === 'bar' || amenity === 'pub') cat = 'restaurants'; 
-        else if (amenity === 'pharmacy') cat = 'pharmacy'; 
-        else if (tourism === 'hotel' || tourism === 'guest_house' || tourism === 'hostel' || tourism === 'motel' || tourism === 'apartment') cat = 'hotels'; 
-        else if (amenity === 'bank' || amenity === 'atm') cat = 'banks'; 
-        else if (tourism === 'museum' || tourism === 'gallery' || tourism === 'attraction' || tourism === 'artwork' || 
-                 amenity === 'theatre' || amenity === 'cinema' || amenity === 'events_venue' || amenity === 'concert_hall' || 
-                 historic) {
-            cat = 'sights';
+    setView(c, z) { this._pendingFit = null; this._setState(z == null ? this._z : this._clampZoom(z), c); return this; }
+    panTo(c) { this._pendingFit = null; this._setState(this._z, c); return this; }
+    getZoom() { return this._z; }
+    getCenter() { return unproject({ x: this._origin.x + this._size.x / 2 - this._pan.x, y: this._origin.y + this._size.y / 2 - this._pan.y }, this._z); }
+    getSize() { return { x: this._size.x, y: this._size.y }; }
+    getContainer() { return this._el; }
+    latLngToLayerPoint(p) { const q = project(p, this._z); return { x: q.x - this._origin.x, y: q.y - this._origin.y }; }
+    latLngToContainerPoint(p) { const q = this.latLngToLayerPoint(p); return { x: q.x + this._pan.x, y: q.y + this._pan.y }; }
+    containerPointToLatLng(pt) { return unproject({ x: this._origin.x + pt.x - this._pan.x, y: this._origin.y + pt.y - this._pan.y }, this._z); }
+
+    zoomBy(d, pt) {
+      const z2 = this._clampZoom(this._z + d);
+      if (z2 === this._z) return this;
+      pt = pt || { x: this._size.x / 2, y: this._size.y / 2 };
+      const a = project(this.containerPointToLatLng(pt), z2);
+      this._setState(z2, unproject({ x: a.x - pt.x + this._size.x / 2, y: a.y - pt.y + this._size.y / 2 }, z2));
+      return this;
+    }
+    fitBounds(pts, o) {
+      o = o || {};
+      if (!Array.isArray(pts) || !pts.length) throw new Error('Ungültiger Kartenausschnitt.');
+      pts = pts.map(chk);
+      if (this._size.x < 2 || this._size.y < 2) { this._pendingFit = [pts, o]; return this; }
+      const px = (o.padding ? o.padding[0] : 0) * 2, py = (o.padding ? o.padding[1] : 0) * 2;
+      const maxZ = this._clampZoom(o.maxZoom == null ? 19 : o.maxZoom);
+      let z = this.options.minZoom;
+      for (let t = maxZ; t >= this.options.minZoom; t--) {
+        const q = pts.map(p => project(p, t));
+        const w = Math.max(...q.map(a => a.x)) - Math.min(...q.map(a => a.x)), h = Math.max(...q.map(a => a.y)) - Math.min(...q.map(a => a.y));
+        if (w <= Math.max(10, this._size.x - px) && h <= Math.max(10, this._size.y - py)) { z = t; break; }
+      }
+      const q = pts.map(p => project(p, z));
+      const cx = (Math.max(...q.map(a => a.x)) + Math.min(...q.map(a => a.x))) / 2, cy = (Math.max(...q.map(a => a.y)) + Math.min(...q.map(a => a.y))) / 2;
+      this._setState(z, unproject({ x: cx, y: cy }, z));
+      return this;
+    }
+    invalidateSize() {
+      const w = this._el.clientWidth, h = this._el.clientHeight;
+      if (w === this._size.x && h === this._size.y) return this;
+      const c = this.getCenter();
+      this._size = { x: w, y: h };
+      if (w > 1 && h > 1) {
+        if (this._pendingFit) { const f = this._pendingFit; this._pendingFit = null; this.fitBounds(f[0], f[1]); }
+        else this._setState(this._z, c);
+      }
+      return this;
+    }
+
+    /* --- Ebenen --- */
+    addLayer(l) { this._layers.add(l); l._onAdd(this); return this; }
+    removeLayer(l) { if (this._layers.delete(l)) l._onRemove(); return this; }
+
+    /* --- Popup --- */
+    _openPopup(p, src, anchor) {
+      this.closePopup();
+      p._map = this; this._popup = p; this._popupSrc = src;
+      const el = p._el = mk('div', 'gm-popup', this._pops);
+      const box = mk('div', 'gm-popup-box', el);
+      box.style.bottom = (8 - ((anchor && anchor[1]) || 0)) + 'px';
+      const body = mk('div', 'gm-popup-body', box); body.innerHTML = p._html == null ? '' : p._html;
+      const x = mk('button', 'gm-popup-x', box); x.type = 'button'; x.setAttribute('aria-label', 'Schließen'); x.textContent = '×';
+      x.addEventListener('click', () => this.closePopup());
+      p._place = () => { const q = this.latLngToLayerPoint(p._ll); el.style.transform = `translate3d(${q.x}px,${q.y}px,0)`; };
+      p._place();
+      requestAnimationFrame(() => this._panIntoView(box));
+    }
+    closePopup() {
+      const p = this._popup;
+      if (p && p._el) p._el.remove();
+      this._popup = null; this._popupSrc = null;
+      return this;
+    }
+    _panIntoView(box) {
+      if (!box.isConnected) return;
+      const r = box.getBoundingClientRect(), c = this._el.getBoundingClientRect(), m = 12;
+      let dx = 0, dy = 0;
+      if (r.top < c.top + m + 40) dy = c.top + m + 40 - r.top;
+      if (r.left < c.left + m + 40) dx = c.left + m + 40 - r.left;
+      else if (r.right > c.right - m) dx = c.right - m - r.right;
+      if (!dx && !dy) return;
+      this._pan.x += dx; this._pan.y += dy;
+      this._applyPan(); this._updateTiles(); this._updateScale();
+    }
+
+    /* --- Kacheln --- */
+    _updateTiles() {
+      if (!this._base || this._size.x < 2 || this._size.y < 2) return;
+      const z = this._z, n = 2 ** z, ox = this._origin.x - this._pan.x, oy = this._origin.y - this._pan.y;
+      const x0 = Math.floor(ox / TILE) - 1, x1 = Math.floor((ox + this._size.x) / TILE) + 1;
+      const y0 = Math.max(0, Math.floor(oy / TILE) - 1), y1 = Math.min(n - 1, Math.floor((oy + this._size.y) / TILE) + 1);
+      const keep = new Set();
+      for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) {
+        const key = z + '/' + x + '/' + y;
+        keep.add(key);
+        if (this._tiles.has(key)) continue;
+        const img = new Image();
+        img._tx = x; img._ty = y;
+        img.className = 'gm-tile'; img.alt = ''; img.draggable = false; img.decoding = 'async';
+        img.style.transform = `translate3d(${x * TILE - this._origin.x}px,${y * TILE - this._origin.y}px,0)`;
+        img.onload = () => { img.classList.add('ok'); this._tileOk(); };
+        img.onerror = () => { img.style.display = 'none'; this._tileErr(); };
+        if (this._base.o.filter) img.style.filter = this._base.o.filter;
+        img.src = this._base.tileUrl(x, y, z);
+        this._tilePane.appendChild(img);
+        this._tiles.set(key, img);
+      }
+      this._tiles.forEach((img, k) => { if (!keep.has(k)) { img.onload = img.onerror = null; img.remove(); this._tiles.delete(k); } });
+    }
+    _updateScale() {
+      const c = this.getCenter(), mpp = metersPerPx(c.lat, this._z), maxM = mpp * 90;
+      if (!isFinite(maxM) || maxM <= 0) return;
+      const pow = 10 ** Math.floor(Math.log10(maxM)), r = maxM / pow, m = (r >= 5 ? 5 : r >= 2 ? 2 : 1) * pow;
+      this._scale.style.width = Math.round(m / mpp) + 'px';
+      this._scale.textContent = m >= 1000 ? (m / 1000) + ' km' : m + ' m';
+    }
+    _moved() { this._updateTiles(); this._updateScale(); this.fire('moveend'); }
+
+    /* --- Bedienung --- */
+    _events() {
+      const el = this._el, pts = new Map();
+      let drag = null, pinch = null, raf = 0;
+      const rect = () => el.getBoundingClientRect();
+      const toPt = e => { const r = rect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+      const ignore = t => t.closest && t.closest('.gm-ctl, .gm-popup, .gm-marker');
+      el.addEventListener('pointerdown', e => {
+        if ((e.pointerType === 'mouse' && e.button !== 0) || ignore(e.target)) return;
+        try { el.setPointerCapture(e.pointerId); } catch { /* egal */ }
+        pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (pts.size === 1) { drag = { x: e.clientX, y: e.clientY, pan: { ...this._pan }, moved: false, t: Date.now() }; el.classList.add('gm-grab'); }
+        else if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) }; drag = null; }
+      });
+      el.addEventListener('pointermove', e => {
+        if (!pts.has(e.pointerId)) return;
+        pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (pinch && pts.size >= 2) {
+          const [a, b] = [...pts.values()], d = Math.hypot(a.x - b.x, a.y - b.y), r = d / (pinch.d || 1);
+          if (r > 1.5 || r < 0.67) {
+            const rc = rect();
+            this.zoomBy(r > 1 ? 1 : -1, { x: (a.x + b.x) / 2 - rc.left, y: (a.y + b.y) / 2 - rc.top });
+            pinch.d = d;
+          }
+          return;
         }
-
-        if(!cat) return null; 
-        
-        return { id: item.id || idx, name: realName, lat: itemLat, lon: itemLon, cat, dist, addr: item.tags?.["addr:street"] || "Vor Ort" }; 
-    }).filter(item => item !== null); 
-    filterPOIsDisplay();
-}
-
-function filterPOIsDisplay() { 
-    if (!poiMarkersGroup) return; 
-    poiMarkersGroup.clearLayers(); 
-    let counts = {}; Object.keys(categoryConfig).forEach(k => counts[k] = 0); 
-    const currentMaxRad = parseFloat(document.getElementById('radiusRange').value) || 0.5;
-
-    fetchedPoiList.forEach((item) => { 
-        if (item.dist <= currentMaxRad && document.getElementById(`poi_${item.cat}`)?.checked) { 
-            counts[item.cat]++; 
-            const cfg = categoryConfig[item.cat]; 
-            L.marker([item.lat, item.lon], { icon: createCustomDivIcon(cfg.color, cfg.emoji) }) 
-              .addTo(poiMarkersGroup) 
-              .bindPopup(`<b>${item.name}</b><br>Distanz: ${formatDistance(item.dist)}<br><button onclick="openGoogleMapsNavigation(${item.lat}, ${item.lon})" style="margin-top:6px; padding:2px 6px; font-size:0.75rem; background:#10b981;">🧭 Navigieren</button>`); 
-        } 
-    }); 
-    Object.keys(counts).forEach(k => { 
-        const el = document.getElementById(`count_${k}`);
-        if(el) el.innerText = `(${counts[k]})`; 
-    }); 
-} 
-function manualRefreshPOIs() { fetchOverpassPOIs(currentLat, currentLon); showToast("Aktualisiere POIs..."); } 
-
-function renderPoiCategoryTabs() { 
-    const container = document.getElementById('poiCategoryTabBar'); 
-    if (!container) return; 
-    container.innerHTML = `<div class="cat-tab ${selectedPoiCategoryTab === 'all' ? 'active' : ''}" onclick="selectPoiCategoryTab('all')">Alle</div>` + 
-        Object.keys(categoryConfig).map(cat => `<div class="cat-tab ${selectedPoiCategoryTab === cat ? 'active' : ''}" onclick="selectPoiCategoryTab('${cat}')">${categoryConfig[cat].emoji} ${categoryConfig[cat].label}</div>`).join(''); 
-} 
-function selectPoiCategoryTab(cat) { selectedPoiCategoryTab = cat; renderPoiCategoryTabs(); renderPoiListModalContent(); } 
-function openPoiListModal() { showModal('poiListModal'); renderPoiCategoryTabs(); renderPoiListModalContent(); } 
-
-function renderPoiListModalContent() { 
-    const container = document.getElementById('poiListModalContainer'); 
-    const searchQ = document.getElementById('poiSearchModalInput').value.toLowerCase(); 
-    const currentMaxRad = parseFloat(document.getElementById('radiusRange').value) || 0.5;
-    let filtered = fetchedPoiList.filter(item => item.dist <= currentMaxRad && (selectedPoiCategoryTab === 'all' || item.cat === selectedPoiCategoryTab) && item.name.toLowerCase().includes(searchQ)); 
-    if (filtered.length === 0) { container.innerHTML = '<div style="color:var(--text-muted); text-align:center; padding:12px;">Keine POIs im Radius.</div>'; return; } 
-    container.innerHTML = filtered.map(item => ` 
-        <div class="poi-list-item" onclick="openGoogleMapsNavigation(${item.lat}, ${item.lon})"> 
-            <div style="display:flex; justify-content:space-between; align-items:center;"> 
-                <strong>${categoryConfig[item.cat].emoji} ${item.name}</strong> 
-                <span style="font-size:0.8rem; color:#34d399;">${formatDistance(item.dist)}</span> 
-            </div> 
-            <div style="font-size:0.8rem; color:var(--text-muted);">${item.addr}</div> 
-        </div> 
-    `).join(''); 
-} 
-
-function setActiveNav(navId) { document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active')); document.getElementById(navId).classList.add('active'); } 
-function navigateToHomeView() { setActiveNav('navItemHome'); document.getElementById('homeViewContainer').style.display = 'flex'; document.getElementById('timelineViewContainer').style.display = 'none'; document.getElementById('consoleViewContainer').style.display = 'none'; if (mainMap) setTimeout(() => mainMap.invalidateSize(), 200); } 
-function navigateToTimelineView() { 
-    setActiveNav('navItemTimeline'); 
-    document.getElementById('homeViewContainer').style.display = 'none'; 
-    document.getElementById('timelineViewContainer').style.display = 'flex'; 
-    document.getElementById('consoleViewContainer').style.display = 'none'; 
-    if (!timelineMap) { 
-        timelineMap = L.map('timelineMap', { zoomControl: false }).setView([50.0, 10.0], 4); 
-        addLayerControlToMap(timelineMap); 
-        timelineGroup = L.layerGroup().addTo(timelineMap); 
-    } 
-    setTimeout(() => { timelineMap.invalidateSize(); renderTimelineOnMap(); renderChronicleYearFilter(); }, 200); 
-} 
-function navigateToConsoleView() { setActiveNav('navItemConsole'); document.getElementById('homeViewContainer').style.display = 'none'; document.getElementById('timelineViewContainer').style.display = 'none'; document.getElementById('consoleViewContainer').style.display = 'flex'; } 
-
-function renderAttachmentHtml(att) {
-    if (!att) return '';
-    if (att.type === '📸 Bild' || att.type === '🖼️ GIF') return `<div style="margin-top:6px;"><img src="${att.data}" style="max-width:100%; max-height:200px; border-radius:8px;"></div>`;
-    if (att.type === '🎥 Video') return `<div style="margin-top:6px;"><video src="${att.data}" controls style="max-width:100%; max-height:200px; border-radius:8px;"></video></div>`;
-    if (att.type === '📍 Standort') return `<div style="font-size:0.85rem; color:#34d399; margin-top:4px;">📍 ${att.data}</div>`;
-    if (att.type === '🎥 YouTube' || att.isYt) {
-        return `
-            <div style="margin-top:8px; background:#0f172a; border-radius:8px; border:1px solid var(--border-color); overflow:hidden;">
-                ${att.thumb ? `<div style="position:relative; cursor:pointer;" onclick="window.open('${att.data}', '_blank')"><img src="${att.thumb}" style="width:100%; height:160px; object-fit:cover;"><div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(0,0,0,0.7); color:white; padding:8px 14px; border-radius:20px; font-weight:bold; font-size:0.9rem;">▶ YouTube abspielen</div></div>` : ''}
-                <div style="padding:8px;"><a href="${att.data}" target="_blank" style="color:var(--accent-color); font-size:0.85rem; text-decoration:none;">🎥 YouTube Video öffnen</a></div>
-            </div>
-        `;
-    }
-    if (att.type === '🔴 Reddit' || att.isReddit) {
-        return `
-            <div style="margin-top:8px; background:#1a1a1b; padding:10px; border-radius:8px; border:1px solid #ff4500;">
-                <a href="${att.data}" target="_blank" style="color:#ff4500; font-size:0.9rem; font-weight:bold; text-decoration:none;">🔴 Reddit Beitrag öffnen</a>
-                <div style="font-size:0.8rem; color:var(--text-muted); margin-top:4px;">${att.data}</div>
-            </div>
-        `;
-    }
-    return '';
-}
-
-function renderPostsFeed() { 
-    const container = document.getElementById('postsFeedContainer'); 
-    let posts = JSON.parse(localStorage.getItem('jannik_posts') || '[]'); 
-    if (posts.length === 0) { container.innerHTML = '<div style="color:var(--text-muted); text-align:center;">Noch keine Beiträge vorhanden.</div>'; return; } 
-    container.innerHTML = posts.map(p => { 
-        let reactionsHtml = Object.keys(p.reactions || {}).map(e => `<span class="reaction-badge" onclick="openEmojiModal(${p.id})">${e} ${p.reactions[e]}</span>`).join(''); 
-        let repliesHtml = (p.replies || []).map(r => `<div style="background:#1e293b; padding:6px 10px; border-radius:6px; margin-top:6px; font-size:0.85rem;"><strong>${r.user}:</strong> ${r.text} ${renderAttachmentHtml(r.attachment)}</div>`).join(''); 
-        return ` 
-            <div style="background:#0f172a; padding:12px; border-radius:10px; border:1px solid var(--border-color); margin-bottom:10px;"> 
-                <div style="font-weight:bold; color:var(--accent-color);">${p.user}</div> 
-                <div style="font-size:0.9rem; margin-top:4px;">${p.text}</div> 
-                ${renderAttachmentHtml(p.attachment)} 
-                <div style="font-size:0.75rem; color:var(--text-muted); margin-top:6px;">${p.date || 'Gerade eben'}</div> 
-                <div style="display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap;"> 
-                    ${reactionsHtml} 
-                    <button onclick="openEmojiModal(${p.id})" style="padding:4px 8px; font-size:0.75rem; min-height:30px;">😀 Reagieren</button> 
-                    <button onclick="openReplyModal(${p.id})" style="padding:4px 8px; font-size:0.75rem; min-height:30px; background:#334155;">💬 Antworten (${(p.replies||[]).length})</button> 
-                </div> 
-                ${repliesHtml} 
-            </div> 
-        `; 
-    }).join(''); 
-} 
-
-function handleCreatePost() { 
-    const text = document.getElementById('postText').value.trim(); 
-    if (!text && !tempActiveAttachment) return; 
-    let posts = JSON.parse(localStorage.getItem('jannik_posts') || '[]'); 
-    posts.unshift({ id: Date.now(), user: localStorage.getItem('jannik_current_user') || 'Gast', text, attachment: tempActiveAttachment, reactions: {}, replies: [], date: new Date().toLocaleTimeString() }); 
-    localStorage.setItem('jannik_posts', JSON.stringify(posts)); 
-    document.getElementById('postText').value = ''; tempActiveAttachment = null; 
-    document.getElementById('postMediaAttachmentIndicator').innerText = ''; 
-    renderPostsFeed(); showToast("Beitrag veröffentlicht!"); 
-} 
-
-function openEmojiModal(postId) { 
-    document.getElementById('emojiPostId').value = postId; 
-    currentEmojiPage = 0; filteredEmojiList = [...emojiList]; 
-    document.getElementById('emojiSearchInput').value = ''; 
-    showModal('emojiModal'); renderEmojiGrid(); 
-} 
-function addReaction(emoji) { 
-    const id = parseInt(document.getElementById('emojiPostId').value); 
-    let posts = JSON.parse(localStorage.getItem('jannik_posts') || '[]'); 
-    let post = posts.find(p => p.id === id); 
-    if (post) { 
-        if (!post.reactions) post.reactions = {}; 
-        post.reactions[emoji] = (post.reactions[emoji] || 0) + 1; 
-        localStorage.setItem('jannik_posts', JSON.stringify(posts)); 
-        renderPostsFeed(); 
-    } 
-    closeModal('emojiModal'); 
-} 
-function openReplyModal(postId) { 
-    document.getElementById('replyPostId').value = postId; 
-    tempActiveAttachment = null; 
-    document.getElementById('replyMediaAttachmentIndicator').innerText = ''; 
-    showModal('replyModal'); 
-} 
-function submitReply() { 
-    const id = parseInt(document.getElementById('replyPostId').value); 
-    const text = document.getElementById('replyText').value.trim(); 
-    if (!text && !tempActiveAttachment) return; 
-    let posts = JSON.parse(localStorage.getItem('jannik_posts') || '[]'); 
-    let post = posts.find(p => p.id === id); 
-    if (post) { 
-        if (!post.replies) post.replies = []; 
-        post.replies.push({ user: localStorage.getItem('jannik_current_user') || 'Gast', text, attachment: tempActiveAttachment }); 
-        localStorage.setItem('jannik_posts', JSON.stringify(posts)); 
-        renderPostsFeed(); 
-    } 
-    document.getElementById('replyText').value = ''; tempActiveAttachment = null; 
-    closeModal('replyModal'); showToast("Antwort hinzugefügt!"); 
-} 
-
-let pendingTravelLat = null, pendingTravelLon = null;
-function geocodeTravelEntryAddress() {
-    const addr = document.getElementById('travelAddressInput').value.trim();
-    if (!addr) return;
-    geocodeAddress(addr, (lat, lon, name) => { pendingTravelLat = lat; pendingTravelLon = lon; document.getElementById('travelAddressInput').value = name; showToast("📍 " + name); });
-}
-function useGPSForTravelEntry() {
-    if ("geolocation" in navigator) {
-        navigator.geolocation.getCurrentPosition(pos => {
-            pendingTravelLat = pos.coords.latitude; pendingTravelLon = pos.coords.longitude;
-            document.getElementById('travelAddressInput').value = "Aktueller GPS Standort";
-            showToast("GPS übernommen!");
-        }, () => showToast("GPS Fehler. Bitte Berechtigungen prüfen."), { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
-    }
-}
-function saveTravelEntry() {
-    const title = document.getElementById('travelTitleInput').value.trim();
-    const date = document.getElementById('travelDateInput').value;
-    const time = document.getElementById('travelTimeInput').value;
-    const desc = document.getElementById('travelDescInput').value.trim();
-    const address = document.getElementById('travelAddressInput').value.trim();
-    if (!address || !title) { showToast("Bitte Titel und Adresse eingeben!"); return; }
-    
-    let entries = JSON.parse(localStorage.getItem('jannik_travel_entries') || '[]');
-    entries.unshift({ id: Date.now(), title, date: date || new Date().toISOString().slice(0, 10), time: time, desc, address, attachment: tempActiveAttachment, lat: pendingTravelLat || currentLat, lon: pendingTravelLon || currentLon });
-    localStorage.setItem('jannik_travel_entries', JSON.stringify(entries));
-    
-    document.getElementById('travelTitleInput').value = '';
-    document.getElementById('travelDescInput').value = '';
-    document.getElementById('travelAddressInput').value = '';
-    document.getElementById('travelTimeInput').value = '';
-    document.getElementById('travelDateInput').value = '';
-    tempActiveAttachment = null;
-    document.getElementById('travelMediaAttachmentIndicator').innerText = '';
-    pendingTravelLat = null; pendingTravelLon = null;
-    renderTravelEntries();
-    renderChronicleYearFilter();
-    showToast("Tagebucheintrag gespeichert!");
-}
-
-let drawnRoutePoints = []; 
-function openRouteDrawingModal() { 
-    showModal('routeDrawingModal'); 
-    setTimeout(() => { 
-        if (!routeDrawMap) { 
-            routeDrawMap = L.map('routeDrawMap', { zoomControl: false }).setView([currentLat, currentLon], 13); 
-            addLayerControlToMap(routeDrawMap); 
-            drawGroup = L.layerGroup().addTo(routeDrawMap); 
-            routeDrawMap.on('click', e => { addDrawnPoint(e.latlng.lat, e.latlng.lng); }); 
-        } 
-        routeDrawMap.invalidateSize(); redrawRouteDrawMap(); 
-    }, 250); 
-} 
-function addDrawnPoint(lat, lon, title = "Station") { 
-    drawnRoutePoints.push({ lat, lon, title: title + " " + (drawnRoutePoints.length + 1), note: "", attachment: null, date: "", time: "" }); 
-    redrawRouteDrawMap(); 
-} 
-function addDrawnPointViaGPS() {
-    if ("geolocation" in navigator) {
-        showToast("📍 Ermittle GPS für Nadel...");
-        navigator.geolocation.getCurrentPosition(pos => {
-            addDrawnPoint(pos.coords.latitude, pos.coords.longitude, "GPS-Station");
-            showToast("GPS-Nadel hinzugefügt!");
-        }, () => showToast("GPS Fehler."), { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
-    }
-}
-function connectRoutePins() { if (drawnRoutePoints.length > 2) { drawnRoutePoints.push(drawnRoutePoints[0]); redrawRouteDrawMap(); } } 
-function undoLastPin() { drawnRoutePoints.pop(); redrawRouteDrawMap(); } 
-function clearDrawnRoutePoints() { drawnRoutePoints = []; redrawRouteDrawMap(); } 
-
-function openPinDetailsModal(idx) {
-    document.getElementById('activeEditingPinIndex').value = idx;
-    const p = drawnRoutePoints[idx];
-    document.getElementById('pinModalStationTitle').innerText = "Station #" + (idx+1) + " bearbeiten";
-    document.getElementById('pinEditTitleInput').value = p.title;
-    document.getElementById('pinEditDateInput').value = p.date || "";
-    document.getElementById('pinEditTimeInput').value = p.time || "";
-    document.getElementById('pinEditNoteInput').value = p.note || "";
-    tempActiveAttachment = p.attachment || null;
-    document.getElementById('pinMediaAttachmentIndicator').innerText = p.attachment ? "📎 Anhang vorhanden" : "";
-    showModal('pinDetailModal');
-}
-function savePinDetailChanges() {
-    const idx = parseInt(document.getElementById('activeEditingPinIndex').value);
-    const p = drawnRoutePoints[idx];
-    if (p) {
-        p.title = document.getElementById('pinEditTitleInput').value.trim() || p.title;
-        p.date = document.getElementById('pinEditDateInput').value;
-        p.time = document.getElementById('pinEditTimeInput').value;
-        p.note = document.getElementById('pinEditNoteInput').value.trim();
-        p.attachment = tempActiveAttachment;
-    }
-    closeModal('pinDetailModal');
-    redrawRouteDrawMap();
-    showToast("Station aktualisiert!");
-}
-
-function redrawRouteDrawMap() { 
-    if (!drawGroup) return; 
-    drawGroup.clearLayers(); 
-    const moveType = document.getElementById('routeMovementType').value;
-    const cfg = movementConfig[moveType] || movementConfig['car'];
-    const latLngs = drawnRoutePoints.map(p => [p.lat, p.lon]); 
-    if (latLngs.length > 1) L.polyline(latLngs, { color: cfg.color, weight: 5 }).addTo(drawGroup); 
-    drawnRoutePoints.forEach((p) => { L.marker([p.lat, p.lon], { icon: createCustomDivIcon(cfg.color, cfg.icon) }).addTo(drawGroup); }); 
-    document.getElementById('pinsListContainer').innerHTML = drawnRoutePoints.map((p, idx) => ` 
-        <div style="background:#0f172a; padding:8px; border-radius:6px; display:flex; justify-content:space-between; align-items:center;"> 
-            <span>${idx+1}. ${p.title} ${p.attachment ? '📎' : ''}</span> 
-            <button onclick="openPinDetailsModal(${idx})" style="padding:2px 8px; font-size:0.75rem;">✍️ Notizen & Medien</button> 
-        </div> 
-    `).join(''); 
-} 
-
-function saveCompletedDrawnRoute() { 
-    if (drawnRoutePoints.length === 0) return; 
-    let totalDist = 0; 
-    for (let i = 0; i < drawnRoutePoints.length - 1; i++) { 
-        totalDist += getDistanceKm(drawnRoutePoints[i].lat, drawnRoutePoints[i].lon, drawnRoutePoints[i+1].lat, drawnRoutePoints[i+1].lon); 
-    } 
-    const moveType = document.getElementById('routeMovementType').value;
-    let routes = JSON.parse(localStorage.getItem('jannik_drawn_routes') || '[]'); 
-    routes.push({ 
-        id: Date.now(), 
-        title: document.getElementById('drawModalTitle').value || "Tour", 
-        date: document.getElementById('drawModalDate').value || new Date().toISOString().slice(0, 10), 
-        time: document.getElementById('drawModalTime').value || '',
-        movementType: moveType, 
-        distanceKm: totalDist, 
-        points: drawnRoutePoints 
-    }); 
-    localStorage.setItem('jannik_drawn_routes', JSON.stringify(routes)); 
-    drawnRoutePoints = []; closeModal('routeDrawingModal'); 
-    renderDistanceStatsSummary(); renderTimelineOnMap(); renderTravelEntries(); 
-    showToast("Strecke gespeichert!"); 
-} 
-
-function toggleMovementFilter(m) {
-    movementFilterState[m] = !movementFilterState[m];
-    renderTimelineOnMap();
-}
-
-function renderDistanceStatsSummary() { 
-    let routes = JSON.parse(localStorage.getItem('jannik_drawn_routes') || '[]'); 
-    let totals = {}; Object.keys(movementConfig).forEach(m => totals[m] = 0);
-    routes.forEach(r => { totals[r.movementType || 'car'] += (r.distanceKm || 0); });
-    
-    document.getElementById('distanceStatsSummary').innerHTML = Object.keys(movementConfig).map(m => {
-        const cfg = movementConfig[m];
-        const isChecked = movementFilterState[m] !== false;
-        return `
-            <div style="background:#1e293b; padding:6px 8px; border-radius:6px; border:1px solid var(--border-color); display:flex; align-items:center; justify-content:space-between;">
-                <label style="cursor:pointer; display:flex; align-items:center; gap:4px; font-weight:bold; color:${cfg.color};">
-                    <input type="checkbox" ${isChecked ? 'checked' : ''} onchange="toggleMovementFilter('${m}')"> ${cfg.icon} ${cfg.label}
-                </label>
-                <span>${formatDistance(totals[m])}</span>
-            </div>
-        `;
-    }).join('');
-} 
-
-function renderTimelineOnMap() { 
-    if (!timelineMap || !timelineGroup) return; 
-    timelineGroup.clearLayers(); 
-    let routes = JSON.parse(localStorage.getItem('jannik_drawn_routes') || '[]'); 
-    routes.forEach(r => { 
-        if (movementFilterState[r.movementType] === false) return;
-        const cfg = movementConfig[r.movementType] || movementConfig['car'];
-        let pts = r.points.map(p => [p.lat, p.lon]); 
-        if (pts.length > 1) L.polyline(pts, { color: cfg.color, weight: 5 }).addTo(timelineGroup); 
-        r.points.forEach(p => L.marker([p.lat, p.lon], { icon: createCustomDivIcon(cfg.color, cfg.icon) }).addTo(timelineGroup)); 
-    }); 
-} 
-
-function renderChronicleYearFilter() {
-    const container = document.getElementById('chronicleYearFilterContainer');
-    if (!container) return;
-    let routes = JSON.parse(localStorage.getItem('jannik_drawn_routes') || '[]');
-    let years = new Set(['all']);
-    routes.forEach(r => { if (r.date) years.add(r.date.slice(0, 4)); });
-    container.innerHTML = Array.from(years).map(y => `<span class="year-chip ${selectedChronicleYear === y ? 'active' : ''}" onclick="selectChronicleYear('${y}')">${y === 'all' ? 'Alle Jahre' : y}</span>`).join('');
-}
-function selectChronicleYear(y) { selectedChronicleYear = y; renderChronicleYearFilter(); renderTravelEntries(); }
-
-function renderTravelEntries() { 
-    const container = document.getElementById('travelEntriesList'); 
-    let routes = JSON.parse(localStorage.getItem('jannik_drawn_routes') || '[]'); 
-    let entries = JSON.parse(localStorage.getItem('jannik_travel_entries') || '[]');
-    
-    if (selectedChronicleYear !== 'all') {
-        routes = routes.filter(r => r.date && r.date.startsWith(selectedChronicleYear));
-        entries = entries.filter(e => e.date && e.date.startsWith(selectedChronicleYear));
-    }
-    
-    let html = '';
-    routes.forEach(r => {
-        let cfg = movementConfig[r.movementType || 'car'];
-        let routeDateTimeStr = [];
-        if (r.date) routeDateTimeStr.push(r.date);
-        if (r.time) routeDateTimeStr.push(r.time + " Uhr");
-
-        html += ` 
-            <div style="background:#0f172a; padding:12px; border-radius:10px; border:1px solid var(--border-color); margin-bottom:10px;"> 
-                <div style="display:flex; justify-content:space-between;"> 
-                    <strong>${cfg.icon} ${r.title}</strong> 
-                    <span style="color:#34d399;">Gesamt: ${formatDistance(r.distanceKm)}</span> 
-                </div> 
-                <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:12px;">Datum & Zeit: ${routeDateTimeStr.join(', ') || 'Keine Angabe'}</div>
-                ${r.points.map((p, i) => {
-                    let segmentInfo = '';
-                    if (i < r.points.length - 1) {
-                        let distToNext = getDistanceKm(p.lat, p.lon, r.points[i+1].lat, r.points[i+1].lon);
-                        segmentInfo = `<div style="margin: 4px 0 4px 14px; border-left: 2px dashed ${cfg.color}; padding-left: 14px; font-size: 0.8rem; color: ${cfg.color}; display: flex; align-items: center; min-height: 26px;">
-                            ${cfg.icon} ${formatDistance(distToNext)}
-                        </div>`;
-                    }
-                    
-                    let dateTimeStr = [];
-                    if (p.date) dateTimeStr.push(p.date);
-                    if (p.time) dateTimeStr.push(p.time + " Uhr");
-                    let dateTimeBadge = dateTimeStr.length > 0 ? `<span style="background:#334155; padding:2px 6px; border-radius:4px; font-size:0.7rem; color:#cbd5e1; margin-left:6px;">🕒 ${dateTimeStr.join(', ')}</span>` : '';
-
-                    return `
-                        <div style="font-size:0.85rem;">
-                            <div style="display:flex; align-items:center; flex-wrap:wrap;">
-                                <strong>📍 Station ${i+1}: ${p.title}</strong> ${dateTimeBadge}
-                            </div>
-                            ${p.note ? `<div style="color:var(--text-muted); margin-top:2px;">📝 ${p.note}</div>` : ''} 
-                            ${renderAttachmentHtml(p.attachment)}
-                        </div>
-                        ${segmentInfo}
-                    `;
-                }).join('')} 
-            </div> 
-        `;
-    });
-    
-    entries.forEach(e => {
-        let dateTimeStr = [];
-        if (e.date) dateTimeStr.push(e.date);
-        if (e.time) dateTimeStr.push(e.time + " Uhr");
-
-        html += `
-            <div style="background:#0f172a; padding:12px; border-radius:10px; border:1px solid var(--border-color); margin-bottom:10px;">
-                <div style="font-weight:bold; color:var(--accent-color);">📍 ${e.title}</div>
-                <div style="font-size:0.8rem; color:#34d399;">Ort: ${e.address}</div>
-                <div style="font-size:0.75rem; color:var(--text-muted);">${dateTimeStr.join(', ')}</div>
-                <div style="font-size:0.9rem; margin-top:4px;">${e.desc}</div>
-                ${renderAttachmentHtml(e.attachment)}
-            </div>
-        `;
-    });
-
-    container.innerHTML = html || '<div style="color:var(--text-muted); text-align:center;">Keine Einträge vorhanden.</div>'; 
-} 
-
-function deleteMyAccount() { handleLogout(); } 
-
-// Media Pickers Helper Functions
-function openGifPicker(target) { 
-    currentMediaAttachmentTarget = target; 
-    showModal('gifPickerModal'); 
-    searchGiphyGifs('travel'); 
-}
-
-function openLocationPicker(target) { 
-    currentMediaAttachmentTarget = target; 
-    showModal('locationPickerModal'); 
-}
-
-function openLinkPicker(target, type = 'yt') {
-    currentMediaAttachmentTarget = target;
-    const titleEl = document.getElementById('linkModalTitle');
-    const labelEl = document.getElementById('linkModalLabel');
-    if (type === 'reddit') {
-        titleEl.innerText = "🔴 Reddit Beitrag teilen";
-        labelEl.innerText = "Reddit URL:";
-        document.getElementById('linkPickerUrlInput').placeholder = "https://www.reddit.com/r/...";
-        window.currentLinkType = 'reddit';
-    } else {
-        titleEl.innerText = "🎥 YouTube Video oder Link";
-        labelEl.innerText = "URL:";
-        document.getElementById('linkPickerUrlInput').placeholder = "https://www.youtube.com/watch?v=...";
-        window.currentLinkType = 'yt';
-    }
-    showModal('linkPickerModal');
-}
-
-function confirmLinkAttachment() {
-    const url = document.getElementById('linkPickerUrlInput').value.trim();
-    if (!url) return;
-    if (window.currentLinkType === 'reddit') {
-        tempActiveAttachment = { type: '🔴 Reddit', data: url, isReddit: true };
-        setAttachmentIndicator(currentMediaAttachmentTarget, '🔴 Reddit angehängt');
-    } else {
-        let ytThumb = '';
-        let isYt = false;
-        if (url.includes('youtube.com') || url.includes('youtu.be')) {
-            isYt = true;
-            let vid = url.includes('v=') ? url.split('v=')[1]?.substring(0, 11) : url.split('youtu.be/')[1]?.substring(0, 11);
-            if (vid) ytThumb = `https://img.youtube.com/vi/${vid}/hqdefault.jpg`;
+        if (!drag) return;
+        const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+        if (!drag.moved && Math.hypot(dx, dy) > 4) drag.moved = true;
+        if (drag.moved) {
+          this._pan = { x: drag.pan.x + dx, y: drag.pan.y + dy };
+          this._applyPan();
+          if (!raf) raf = requestAnimationFrame(() => { raf = 0; this._updateTiles(); });
         }
-        tempActiveAttachment = { type: '🎥 YouTube', data: url, thumb: ytThumb, isYt };
-        setAttachmentIndicator(currentMediaAttachmentTarget, '🎥 Link angehängt');
+      });
+      const up = e => {
+        if (!pts.has(e.pointerId)) return;
+        pts.delete(e.pointerId);
+        if (pts.size < 2) pinch = null;
+        if (pts.size === 0) el.classList.remove('gm-grab');
+        if (pts.size === 0 && drag) {
+          const d = drag; drag = null;
+          if (d.moved) this._moved();
+          else if (e.type === 'pointerup') this._onClick(toPt(e));
+        }
+      };
+      el.addEventListener('pointerup', up);
+      el.addEventListener('pointercancel', up);
+      let wheelT = 0;
+      el.addEventListener('wheel', e => {
+        if (ignore(e.target)) return;
+        e.preventDefault();
+        const now = Date.now();
+        if (now - wheelT < 200) return;
+        wheelT = now;
+        this.zoomBy(e.deltaY < 0 ? 1 : -1, toPt(e));
+      }, { passive: false });
+      el.addEventListener('keydown', e => {
+        if (e.target !== el) return;
+        const k = e.key, s = 120;
+        if (k === '+' || k === '=') this.zoomBy(1);
+        else if (k === '-' || k === '_') this.zoomBy(-1);
+        else if (k.startsWith('Arrow')) {
+          e.preventDefault();
+          this._pan.x += k === 'ArrowLeft' ? s : k === 'ArrowRight' ? -s : 0;
+          this._pan.y += k === 'ArrowUp' ? s : k === 'ArrowDown' ? -s : 0;
+          this._applyPan(); this._moved();
+        }
+      });
+      el.addEventListener('dragstart', e => e.preventDefault());
     }
-    closeModal('linkPickerModal');
-    document.getElementById('linkPickerUrlInput').value = '';
+    _onClick(pt) {
+      if (this._popup) this.closePopup();
+      const m = this._layersBox.querySelector('.gm-menu'); if (m) m.hidden = true;
+      this.fire('click', { latlng: this.containerPointToLatLng(pt), containerPoint: pt });
+    }
+  }
+
+  return {
+    version: 'eigene-karte-1',
+    map: (t, o) => new GMap(t, o),
+    tileLayer: (u, o) => new TileLayer(u, o),
+    marker: (p, o) => new Marker(p, o),
+    polyline: (p, o) => new Polyline(p, o),
+    circle: (p, o) => new Circle(p, o),
+    layerGroup: () => new LayerGroup(),
+    popup: () => new Popup(),
+    divIcon: o => o
+  };
+})();
+
+
+'use strict';
+/* =====================================================================
+   Reiseplaner – Kern: Helfer, Speicher, Medien-DB, Dialoge, Navigation
+   ===================================================================== */
+
+/* ---------- DOM- und Text-Helfer ---------- */
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const ic = (n, cls = '') => `<svg class="i ${cls}" aria-hidden="true"><use href="#i-${n}"></use></svg>`;
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const pad = n => String(n).padStart(2, '0');
+
+/* Nur http(s)-Adressen zulassen (schützt vor javascript:-Links). */
+function safeUrl(u) {
+  u = String(u || '').trim();
+  if (!u) return '';
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(u)) u = 'https://' + u;
+  try {
+    const x = new URL(u);
+    return /^https?:$/.test(x.protocol) ? x.href : '';
+  } catch { return ''; }
 }
 
-function openPollPicker(target) { 
-    currentMediaAttachmentTarget = target; 
-    showModal('pollPickerModal'); 
+/* Text mit klickbaren Links – erst escapen, dann verlinken. */
+function linkify(raw) {
+  return esc(raw).replace(/https?:\/\/[^\s<]+/g, m => {
+    const t = m.match(/[.,;:!?)]+$/);
+    const tail = t ? t[0] : '';
+    const url = tail ? m.slice(0, -tail.length) : m;
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>${tail}`;
+  });
 }
 
-// Direkt beim Laden das Login-Overlay anzeigen
-window.onload = function() { 
-    document.getElementById('loginUser').value = 'admin';
-    document.getElementById('loginPass').value = 'admin';
-}; 
-</script> 
-</body> 
-</html>
+/* ---------- Datum, Zeit, Distanz ---------- */
+const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+function fmtDate(iso) {
+  if (!iso) return '';
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  return m ? `${m[3]}.${m[2]}.${m[1]}` : String(iso);
+}
+const dtLabel = (date, time) => [fmtDate(date), time ? time + ' Uhr' : ''].filter(Boolean).join(', ');
+const sortKey = (date, time) => `${date || '0000-00-00'}T${time || '00:00'}`;
+function timeAgo(ts) {
+  const t = new Date(ts).getTime();
+  if (!t) return '';
+  const s = Math.round((Date.now() - t) / 1000);
+  if (s < 45) return 'gerade eben';
+  if (s < 3600) return `vor ${Math.round(s / 60)} Min.`;
+  if (s < 86400) return `vor ${Math.round(s / 3600)} Std.`;
+  if (s < 604800) return `vor ${Math.round(s / 86400)} Tg.`;
+  const d = new Date(t);
+  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
+}
+function getDistanceKm(lat1, lon1, lat2, lon2) {
+  const R = 6371, rad = Math.PI / 180;
+  const dLat = (lat2 - lat1) * rad, dLon = (lon2 - lon1) * rad;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+const formatDistance = d => d < 1 ? Math.round(d * 1000) + ' m' : d.toFixed(d < 10 ? 2 : 1).replace('.', ',') + ' km';
 
+/* ---------- Speicher ---------- */
+const K = {
+  user: 'jannik_current_user',
+  users: 'reisen_users',
+  cloud: 'jannik_cloud_settings',
+  entries: 'jannik_travel_entries',
+  routes: 'jannik_drawn_routes',
+  posts: 'jannik_posts',
+  
